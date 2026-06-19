@@ -1,0 +1,14 @@
+# 依赖(运行时零依赖,vendor 仅开发/打包用)
+/vendor/
+/node_modules/
+
+# 构建产物
+/build/
+*.zip
+
+# 系统/编辑器
+.DS_Store
+Thumbs.db
+*.log
+.idea/
+.vscode/

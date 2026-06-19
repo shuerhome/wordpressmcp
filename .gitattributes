@@ -1,0 +1,6 @@
+# 统一以 LF 存储文本,避免跨平台换行噪声
+* text=auto eol=lf
+*.php text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.txt text eol=lf
