@@ -3,7 +3,7 @@
  * Plugin Name:       WP MCP — WordPress/WooCommerce MCP Server
  * Plugin URI:        https://github.com/shuerhome/wordpressmcp
  * Description:        把本站变成一个 MCP 服务器,让 Claude 通过站点 URL 精细控制 WordPress / WooCommerce。
- * Version:           0.1.1
+ * Version:           0.2.0
  * Requires at least: 5.9
  * Requires PHP:      7.4
  * Author:            shuerhome
@@ -15,7 +15,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'WP_MCP_VERSION', '0.1.1' );
+define( 'WP_MCP_VERSION', '0.2.0' );
 define( 'WP_MCP_FILE', __FILE__ );
 define( 'WP_MCP_DIR', plugin_dir_path( __FILE__ ) );
 define( 'WP_MCP_URL', plugin_dir_url( __FILE__ ) );
