@@ -41,8 +41,8 @@ class Auth {
 			return new \WP_Error( 'wp_mcp_ip_blocked', 'IP 不在白名单内', array( 'status' => 403 ) );
 		}
 
-		// 4. 令牌校验。
-		$token = self::extract_bearer_token();
+		// 4. 令牌校验(兼容三种来源:Bearer 头 / ?token= 查询参数 / X-MCP-Token 头)。
+		$token = self::extract_token( $request );
 
 		if ( $token && self::verify_token( $token ) ) {
 			$user_id = (int) get_option( self::OPT_BOUND_USER, 0 );
@@ -106,15 +106,34 @@ class Auth {
 	}
 
 	/**
-	 * 从 Authorization 头提取 Bearer 令牌。
+	 * 提取访问令牌,按优先级尝试三种来源:
+	 *  1) Authorization: Bearer <token>  —— Claude Code / 标准 MCP 客户端。
+	 *  2) ?token=<token> 查询参数         —— claude.ai 网页端连接器(令牌内嵌在 URL,无法传自定义头)。
+	 *  3) X-MCP-Token: <token> 头         —— 其他可设头但不便用 Authorization 的客户端。
 	 *
+	 * @param \WP_REST_Request|mixed $request 请求。
 	 * @return string
 	 */
-	private static function extract_bearer_token() {
+	private static function extract_token( $request ) {
+		// 1) Authorization: Bearer。
 		$header = self::get_auth_header();
 		if ( $header && 0 === stripos( $header, 'bearer ' ) ) {
 			return trim( substr( $header, 7 ) );
 		}
+
+		// 2) URL 查询参数 ?token=(仅取 URL query,避免误用 JSON-RPC 正文里的同名字段)。
+		if ( $request instanceof \WP_REST_Request ) {
+			$query = $request->get_query_params();
+			if ( ! empty( $query['token'] ) ) {
+				return trim( (string) $query['token'] );
+			}
+		}
+
+		// 3) X-MCP-Token 头。
+		if ( ! empty( $_SERVER['HTTP_X_MCP_TOKEN'] ) ) {
+			return trim( wp_unslash( $_SERVER['HTTP_X_MCP_TOKEN'] ) );
+		}
+
 		return '';
 	}
 

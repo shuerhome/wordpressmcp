@@ -83,11 +83,29 @@ wp-mcp/
 
 1. 把 `wp-mcp` 目录打包为 zip,后台「插件 → 上传安装」并启用。
 2. 「设置 → WP MCP」→「生成令牌」,复制明文。
-3. Claude Code 连接:
-   ```bash
-   claude mcp add --transport http mysite https://你的站点/wp-json/mcp/v1 \
-     --header "Authorization: Bearer <令牌>"
-   ```
+3. 端点(两个都可用,推荐 `/rpc`,无尾斜杠更稳):
+   `https://你的站点/wp-json/mcp/v1/rpc`
+
+鉴权支持三种来源(任一即可):`Authorization: Bearer <令牌>` 头、`?token=<令牌>` 查询参数、`X-MCP-Token: <令牌>` 头。
+
+### A. Claude Code(CLI / VSCode / JetBrains)— 推荐
+
+```bash
+claude mcp add --transport http mysite https://你的站点/wp-json/mcp/v1/rpc \
+  --header "Authorization: Bearer <令牌>"
+```
+
+### B. claude.ai 网页端(自定义连接器)
+
+「设置 → 连接器 → 添加自定义连接器」,URL 填(令牌内嵌在 URL):
+
+```
+https://你的站点/wp-json/mcp/v1/rpc?token=<令牌>
+```
+
+- 需站点为**公网 HTTPS**(claude.ai 云端要能访问到)。
+- 令牌在 URL 中易被日志/历史留存,**建议同时启用 IP 白名单**,并按需重新生成令牌吊销旧的。
+- 网页端连接器规则可能变化;能否连通以实际为准。若网页端要求 OAuth,则需后续给插件补 OAuth(规划中)。
 
 ## 本地冒烟测试(无需 Claude)
 
@@ -118,21 +136,29 @@ curl -s -X POST https://你的站点/wp-json/mcp/v1/ \
   2. 取得用户确认后,带上该 `confirm_token` 再次调用 → 执行。
   - 受设置页「危险操作需二次确认」开关控制。
 
-## 更新机制(私有更新服务器)
+## 更新机制
 
-插件内置一个**零依赖**的更新器([includes/update/class-updater.php](includes/update/class-updater.php)),直连
-仓库的 **GitHub Releases** 检查新版——各站像普通插件一样收到更新提示、一键升级,无需逐站手动传包。
+插件内置一个**零依赖**的更新器([includes/update/class-updater.php](includes/update/class-updater.php)),
+可直连仓库的 **GitHub Releases** 检查新版。但它的「检查版本」与「下载安装」两步都依赖对仓库的**匿名访问**:
 
-**发版流程:**
-1. 改好代码,把 [wp-mcp.php](wp-mcp.php) 与 [readme.txt](readme.txt) 里的版本号一起 bump(如 `0.2.0`)。
-2. 在 GitHub 仓库发布一个 Release,**tag 命名为 `v0.2.0`**(`v` 前缀会被自动去掉)。
-3. 建议附带一个打包好的插件 zip 资产(内含 `wp-mcp/` 目录);若不附,更新器回退到
-   GitHub 自动源码包,并在安装时把目录改名回 `wp-mcp`。
-4. 各站后台约 12 小时内自动提示更新;也可在「设置 → WP MCP → 插件更新 → 立即检查更新」强制刷新。
+- ✅ **仓库为 Public 时**:自动更新开箱即用——各站后台像普通插件一样收到更新提示、一键升级。
+- ⚠️ **本仓库当前为 Private**:匿名访问拿不到 Releases,且 WordPress 升级器下载源码包时不带鉴权,
+  所以**自动更新不生效**(更新器会优雅失败,不影响插件功能)。私有仓库请走下面的**手动升级**。
 
-**配置:**
-- 默认仓库 `shuerhome/wordpressmcp`;如需改,在 `wp-config.php` 定义 `WP_MCP_UPDATE_REPO`。
-- 私有仓库:用 `wp_mcp_github_auth_token` 过滤器提供 token(并确保 Release 附带可下载的 zip 资产)。
+> 即便用 `wp_mcp_github_auth_token` 过滤器给「检查」步骤提供 token,核心升级器的「下载」步骤仍不带鉴权,
+> 私有源码包会下载失败。因此私有仓库下不建议依赖自动更新。
+
+### 手动升级(私有仓库)
+
+1. 改好代码,把 [wp-mcp.php](wp-mcp.php) 与 [readme.txt](readme.txt) 的版本号一起 bump(如 `0.2.0`),提交推送。
+2. 把插件打包为 zip(根目录即 `wp-mcp/`)。
+3. 各站后台「插件 → 上传插件」覆盖安装;或用本插件的 `wp_plugins` 工具远程升级。
+
+### 想要自动更新
+
+把仓库改为 Public 即可,**无需改代码**:更新器会自动开始工作。默认仓库 `shuerhome/wordpressmcp`,
+可用常量 `WP_MCP_UPDATE_REPO`(定义在 `wp-config.php`)覆盖。发版时在仓库发布 Release(tag 形如 `v0.2.0`,
+`v` 前缀自动去掉);因布局是「插件文件放仓库根」,GitHub 源码包可直接安装,无需额外附 zip 资产。
 
 ## 下一步(阶段 5:安全加固与分发)
 

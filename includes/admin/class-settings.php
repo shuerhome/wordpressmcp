@@ -149,9 +149,21 @@ class Settings {
 					</td>
 				</tr>
 				<tr>
-					<th scope="row">Claude 连接命令</th>
+					<th scope="row">A. Claude Code 连接命令</th>
 					<td>
 						<code style="display:block;padding:8px;background:#f6f7f7;">claude mcp add --transport http <?php echo esc_html( get_bloginfo( 'name' ) ); ?> <?php echo esc_html( $endpoint ); ?> --header "Authorization: Bearer &lt;令牌&gt;"</code>
+						<p class="description">用 Bearer 令牌头鉴权,最安全,推荐 CLI / VSCode / JetBrains。</p>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row">B. claude.ai 网页端连接 URL</th>
+					<td>
+						<code style="display:block;padding:8px;background:#f6f7f7;"><?php echo esc_html( $endpoint ); ?>?token=<?php echo $new_token ? esc_html( rawurlencode( $new_token ) ) : '&lt;令牌&gt;'; ?></code>
+						<p class="description">
+							网页端「设置 → 连接器 → 添加自定义连接器」填这个 URL(令牌内嵌在 URL 里)。
+							<strong>安全提示:</strong>令牌在 URL 中易被日志/历史留存,建议同时启用下方 IP 白名单,并可随时重新生成令牌吊销旧的。
+							需站点为<strong>公网 HTTPS</strong>;能否成功连接以实际为准(网页端连接器规则可能变化)。
+						</p>
 					</td>
 				</tr>
 			</table>
