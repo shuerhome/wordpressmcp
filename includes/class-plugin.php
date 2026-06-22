@@ -86,6 +86,7 @@ final class Plugin {
 			'includes/tools/wp/class-wp-content-tool.php',
 			'includes/tools/wp/class-wp-media-tool.php',
 			'includes/tools/wp/class-wp-blocks-tool.php',
+			'includes/tools/wp/class-wp-elementor-tool.php',
 			'includes/tools/wp/class-wp-design-tool.php',
 			'includes/tools/wp/class-wp-theme-tool.php',
 			'includes/tools/wp/class-wp-taxonomy-tool.php',

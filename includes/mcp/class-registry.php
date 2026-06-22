@@ -14,6 +14,7 @@ use WPMCP\Tools\WP\WP_Site_Tool;
 use WPMCP\Tools\WP\WP_Content_Tool;
 use WPMCP\Tools\WP\WP_Media_Tool;
 use WPMCP\Tools\WP\WP_Blocks_Tool;
+use WPMCP\Tools\WP\WP_Elementor_Tool;
 use WPMCP\Tools\WP\WP_Design_Tool;
 use WPMCP\Tools\WP\WP_Theme_Tool;
 use WPMCP\Tools\WP\WP_Taxonomy_Tool;
@@ -65,6 +66,11 @@ class Registry {
 		$this->register( new WP_Menus_Tool() );
 		$this->register( new WP_Widgets_Tool() );
 		$this->register( new WP_System_Tool() );
+
+		// Elementor 工具(仅在 Elementor 启用时暴露)。
+		if ( defined( 'ELEMENTOR_VERSION' ) ) {
+			$this->register( new WP_Elementor_Tool() );
+		}
 
 		// WooCommerce 工具(仅在 WC 启用时暴露)。
 		if ( class_exists( 'WooCommerce' ) ) {
