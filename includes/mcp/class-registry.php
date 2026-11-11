@@ -25,6 +25,7 @@ use WPMCP\Tools\WP\WP_Plugins_Tool;
 use WPMCP\Tools\WP\WP_Menus_Tool;
 use WPMCP\Tools\WP\WP_Widgets_Tool;
 use WPMCP\Tools\WP\WP_System_Tool;
+use WPMCP\Tools\WP\WP_Rest_Tool;
 use WPMCP\Tools\WC\WC_Products_Tool;
 use WPMCP\Tools\WC\WC_Orders_Tool;
 use WPMCP\Tools\WC\WC_Reports_Tool;
@@ -66,6 +67,11 @@ class Registry {
 		$this->register( new WP_Menus_Tool() );
 		$this->register( new WP_Widgets_Tool() );
 		$this->register( new WP_System_Tool() );
+
+		// 通用 REST 通道(可在设置页关闭)。
+		if ( get_option( 'wp_mcp_enable_rest', 1 ) ) {
+			$this->register( new WP_Rest_Tool() );
+		}
 
 		// Elementor 工具(仅在 Elementor 启用时暴露)。
 		if ( defined( 'ELEMENTOR_VERSION' ) ) {

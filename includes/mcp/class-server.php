@@ -131,7 +131,31 @@ class Server {
 				'name'    => 'wp-mcp',
 				'version' => WP_MCP_VERSION,
 			),
+			'instructions'    => $this->instructions(),
 		);
+	}
+
+	/**
+	 * 给客户端模型的通用使用说明(不依赖具体模型厂商)。
+	 *
+	 * @return string
+	 */
+	private function instructions() {
+		$text = 'This server controls a WordPress site'
+			. ( $this->registry->get( 'wc_products' ) ? ' with WooCommerce' : '' )
+			. '. Every tool takes an "action" argument; see each tool description for its actions. '
+			. 'Start with wp_site (action=capabilities) to learn what this site supports. '
+			. 'Prefer the dedicated wp_* / wc_* tools for common tasks. ';
+
+		if ( $this->registry->get( 'wp_rest' ) ) {
+			$text .= 'For anything they do not cover, use wp_rest: action=routes to find a REST route, action=describe to see its parameters, action=call to invoke it. ';
+		}
+
+		$text .= 'Write actions accept dry_run=true to preview without changing anything. '
+			. 'Destructive actions return confirmation_required with a confirm_token: ask the user to confirm, then repeat the same call with that confirm_token. '
+			. 'Customer personal data is masked by default in the dedicated tools.';
+
+		return $text;
 	}
 
 	/**

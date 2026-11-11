@@ -85,6 +85,7 @@ class Settings {
 		update_option( 'wp_mcp_require_confirm', isset( $_POST['wp_mcp_require_confirm'] ) ? 1 : 0 );
 		update_option( 'wp_mcp_mask_pii', isset( $_POST['wp_mcp_mask_pii'] ) ? 1 : 0 );
 		update_option( 'wp_mcp_audit', isset( $_POST['wp_mcp_audit'] ) ? 1 : 0 );
+		update_option( 'wp_mcp_enable_rest', isset( $_POST['wp_mcp_enable_rest'] ) ? 1 : 0 );
 
 		if ( isset( $_POST['wp_mcp_bound_user'] ) ) {
 			update_option( 'wp_mcp_bound_user', absint( $_POST['wp_mcp_bound_user'] ) );
@@ -206,7 +207,8 @@ class Settings {
 						<td>
 							<label><input type="checkbox" name="wp_mcp_require_confirm" value="1" <?php checked( get_option( 'wp_mcp_require_confirm', 1 ) ); ?> /> 危险操作需二次确认</label><br/>
 							<label><input type="checkbox" name="wp_mcp_mask_pii" value="1" <?php checked( get_option( 'wp_mcp_mask_pii', 1 ) ); ?> /> 默认脱敏客户/订单 PII</label><br/>
-							<label><input type="checkbox" name="wp_mcp_audit" value="1" <?php checked( get_option( 'wp_mcp_audit', 1 ) ); ?> /> 记录审计日志</label>
+							<label><input type="checkbox" name="wp_mcp_audit" value="1" <?php checked( get_option( 'wp_mcp_audit', 1 ) ); ?> /> 记录审计日志</label><br/>
+							<label><input type="checkbox" name="wp_mcp_enable_rest" value="1" <?php checked( get_option( 'wp_mcp_enable_rest', 1 ) ); ?> /> 启用通用 REST 通道(wp_rest:可调用本站全部 REST 接口,权限以绑定用户为准)</label>
 						</td>
 					</tr>
 					<tr>

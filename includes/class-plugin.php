@@ -97,6 +97,7 @@ final class Plugin {
 			'includes/tools/wp/class-wp-menus-tool.php',
 			'includes/tools/wp/class-wp-widgets-tool.php',
 			'includes/tools/wp/class-wp-system-tool.php',
+			'includes/tools/wp/class-wp-rest-tool.php',
 			'includes/tools/wc/class-wc-products-tool.php',
 			'includes/tools/wc/class-wc-orders-tool.php',
 			'includes/tools/wc/class-wc-reports-tool.php',
@@ -121,6 +122,7 @@ final class Plugin {
 	public static function on_activation() {
 		add_option( 'wp_mcp_enabled', 1 );
 		add_option( 'wp_mcp_require_confirm', 1 );
+		add_option( 'wp_mcp_enable_rest', 1 );
 		add_option( 'wp_mcp_mask_pii', 1 );
 		add_option( 'wp_mcp_audit', 1 );
 		add_option( 'wp_mcp_ip_allowlist', '' );
