@@ -42,7 +42,7 @@ class WP_Users_Tool extends Abstract_Tool {
 	 * {@inheritDoc}
 	 */
 	protected function destructive_actions() {
-		return array( 'delete' );
+		return array( 'create', 'update', 'set_role', 'delete' );
 	}
 
 	/**

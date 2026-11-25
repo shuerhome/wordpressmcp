@@ -22,6 +22,13 @@ class WP_Plugins_Tool extends Abstract_Tool {
 	/**
 	 * {@inheritDoc}
 	 */
+	protected function is_open_world() {
+		return true;
+	}
+
+	/**
+	 * {@inheritDoc}
+	 */
 	public function get_name() {
 		return 'wp_plugins';
 	}
@@ -44,7 +51,7 @@ class WP_Plugins_Tool extends Abstract_Tool {
 	 * {@inheritDoc}
 	 */
 	protected function destructive_actions() {
-		return array( 'install', 'update', 'delete' );
+		return array( 'activate', 'deactivate', 'install', 'update', 'delete' );
 	}
 
 	/**

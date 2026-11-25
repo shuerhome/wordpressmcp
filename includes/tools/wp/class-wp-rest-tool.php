@@ -15,6 +15,7 @@ defined( 'ABSPATH' ) || exit;
 use WPMCP\Safety\Audit;
 use WPMCP\Safety\Guard;
 use WPMCP\Safety\Pii;
+use WPMCP\Safety\Secrets;
 use WPMCP\Tools\Abstract_Tool;
 
 /**
@@ -39,7 +40,8 @@ class WP_Rest_Tool extends Abstract_Tool {
 	public function get_description() {
 		return '通用 REST 通道 / Generic REST gateway: 以绑定用户权限调用本站任意 REST 路由(WordPress /wp/v2、WooCommerce /wc/v3、以及第三方插件注册的路由)。专用工具(wc_products、wc_orders 等)没有覆盖的功能都走这里,例如商品图片/属性/变体、创建与编辑订单、税率、支付网关、运费、商品评价、自定义字段(meta)。'
 			. '用法: namespaces=列出命名空间; routes=列出路由(可按 namespace / search 过滤); describe=查看某路由各方法的参数定义; call=发起请求(method + path + query + body)。'
-			. '调用前不确定参数时先 describe。列表请求建议用 query 传 per_page、page、_fields 控制体积。POST/PUT/PATCH 支持 dry_run; DELETE 需二次确认(confirm_token)。';
+			. '调用前不确定参数时先 describe。列表请求建议用 query 传 per_page、page、_fields 控制体积。POST/PUT/PATCH 支持 dry_run。DELETE 以及退款、批量操作、用户、插件、支付网关、站点设置、webhook、客户账户等敏感写操作需二次确认(confirm_token)。'
+			. '返回结果中的客户个人信息默认脱敏;API 密钥、密码等一律显示为 [hidden],写回时值为 [hidden] 的字段会被忽略、保留原值。';
 	}
 
 	/**
@@ -111,6 +113,16 @@ class WP_Rest_Tool extends Abstract_Tool {
 	}
 
 	/**
+	 * call 可能包含删除、退款等危险操作(具体是否需确认由 sensitive_reason 判定)。
+	 * 仅用于工具标注;本工具不经基类 guard()。
+	 *
+	 * @return string[]
+	 */
+	protected function destructive_actions() {
+		return array( 'call' );
+	}
+
+	/**
 	 * 入口:与基类一致,但审计里记录「方法 + 路径」而非仅 action。
 	 *
 	 * @param array $args 入参。
@@ -146,7 +158,14 @@ class WP_Rest_Tool extends Abstract_Tool {
 	protected function run( $action, $args ) {
 		switch ( $action ) {
 			case 'namespaces':
-				return array( 'namespaces' => array_values( rest_get_server()->get_namespaces() ) );
+				$self = $this;
+				$list = array_filter(
+					rest_get_server()->get_namespaces(),
+					function ( $ns ) use ( $self ) {
+						return ! $self->is_own_route( '/' . $ns . '/' ) && $self->namespace_allowed( '/' . $ns . '/' );
+					}
+				);
+				return array( 'namespaces' => array_values( $list ) );
 			case 'routes':
 				return $this->routes( $args );
 			case 'describe':
@@ -170,7 +189,7 @@ class WP_Rest_Tool extends Abstract_Tool {
 		$out   = array();
 		$total = 0;
 		foreach ( rest_get_server()->get_routes( $namespace ) as $route => $handlers ) {
-			if ( $this->is_own_route( $route ) ) {
+			if ( $this->is_own_route( $route ) || ! $this->namespace_allowed( $route ) ) {
 				continue;
 			}
 			if ( '' !== $search && false === stripos( $route, $search ) ) {
@@ -190,6 +209,10 @@ class WP_Rest_Tool extends Abstract_Tool {
 			'total'  => $total,
 			'routes' => $out,
 		);
+		$allowed = $this->allowed_namespaces();
+		if ( ! empty( $allowed ) ) {
+			$result['allowed_namespaces'] = $allowed;
+		}
 		if ( $total > count( $out ) ) {
 			$result['note'] = sprintf( '仅返回前 %d 条,请用 namespace 或 search 缩小范围。', self::MAX_ROUTES );
 		}
@@ -222,7 +245,7 @@ class WP_Rest_Tool extends Abstract_Tool {
 			}
 		}
 
-		if ( null === $match || $this->is_own_route( $match ) ) {
+		if ( null === $match || $this->is_own_route( $match ) || ! $this->namespace_allowed( $match ) ) {
 			return new \WP_Error( 'wp_mcp_not_found', '没有匹配的路由:' . $path . '。可先用 routes 查找。' );
 		}
 
@@ -267,6 +290,12 @@ class WP_Rest_Tool extends Abstract_Tool {
 		if ( $this->is_own_route( $path ) ) {
 			return new \WP_Error( 'wp_mcp_forbidden_route', '不能通过 wp_rest 调用 MCP 自身的端点。' );
 		}
+		if ( ! $this->namespace_allowed( $path ) ) {
+			return new \WP_Error(
+				'wp_mcp_forbidden_route',
+				'该路由不在允许的命名空间内(设置 → WP MCP → REST 通道允许的命名空间)。当前允许:' . implode( ', ', $this->allowed_namespaces() )
+			);
+		}
 
 		// path 里带了 ?a=b 时并入 query。
 		$qpos = strpos( $path, '?' );
@@ -276,6 +305,15 @@ class WP_Rest_Tool extends Abstract_Tool {
 			$query = array_merge( $extra, $query );
 			$path  = substr( $path, 0, $qpos );
 		}
+
+		// 不允许通过参数改写 HTTP 方法(绕过确认)。
+		unset( $query['_method'] );
+		// 限定命名空间时不允许 _embed(内嵌资源可能来自其他命名空间)。
+		if ( ! empty( $this->allowed_namespaces() ) ) {
+			unset( $query['_embed'] );
+		}
+		// 模型读到 [hidden] 后原样写回时,忽略这些字段,避免覆盖真实密钥。
+		$body = Secrets::strip_placeholders( $body );
 
 		if ( 'GET' !== $method ) {
 			$summary = sprintf( '%s %s', $method, $path );
@@ -291,7 +329,9 @@ class WP_Rest_Tool extends Abstract_Tool {
 				);
 			}
 
-			if ( 'DELETE' === $method && get_option( 'wp_mcp_require_confirm', 1 ) ) {
+			$sensitive = $this->sensitive_reason( $method, $path );
+			if ( null !== $sensitive && get_option( 'wp_mcp_require_confirm', 1 ) ) {
+				$summary  = '[' . $sensitive . '] ' . $summary;
 				$sig_args = array(
 					'method'        => $method,
 					'path'          => $path,
@@ -327,6 +367,9 @@ class WP_Rest_Tool extends Abstract_Tool {
 		if ( empty( $query['_links'] ) ) {
 			$data = $this->strip_links( $data );
 		}
+
+		// 密钥一律隐藏(不提供解锁)。
+		$data = Secrets::mask( $data );
 
 		// 与专用工具一致:默认脱敏客户 PII。
 		$masked = Pii::should_mask( $args );
@@ -413,6 +456,92 @@ class WP_Rest_Tool extends Abstract_Tool {
 		$result['keys'] = is_array( $data ) ? array_keys( $data ) : array();
 		$result['note'] = $hint;
 		return $result;
+	}
+
+	/**
+	 * 判断写操作是否敏感(需二次确认)。返回原因,不敏感时返回 null。
+	 *
+	 * @param string $method HTTP 方法。
+	 * @param string $path   路径。
+	 * @return string|null
+	 */
+	private function sensitive_reason( $method, $path ) {
+		if ( 'GET' === $method ) {
+			return null;
+		}
+		if ( 'DELETE' === $method ) {
+			return '删除';
+		}
+
+		$rules = array(
+			'@^/wc/v\d+/orders/\d+/refunds@i' => '退款(涉及资金)',
+			'@/batch(/|$)@i'                    => '批量操作(可能包含删除)',
+			'@^/batch/v\d+@i'                  => '批量操作(可能包含删除)',
+			'@^/wp/v2/users@i'                  => '用户/角色/密码变更',
+			'@^/wp/v2/plugins@i'                => '插件安装或启停',
+			'@^/wp/v2/themes@i'                 => '主题变更',
+			'@^/wp/v2/settings@i'               => '站点设置变更',
+			'@^/wc/v\d+/payment_gateways@i'    => '支付网关变更',
+			'@^/wc/v\d+/settings@i'            => '店铺设置变更',
+			'@^/wc/v\d+/webhooks@i'            => 'Webhook 变更(可能把数据发往外部地址)',
+			'@^/wc/v\d+/system_status/tools@i' => '运行系统维护工具',
+			'@^/wc/v\d+/customers@i'           => '客户账户变更',
+		);
+
+		/**
+		 * 过滤 wp_rest 敏感写操作规则:正则 => 原因。
+		 *
+		 * @param array  $rules  规则。
+		 * @param string $method HTTP 方法。
+		 * @param string $path   路径。
+		 */
+		$rules = apply_filters( 'wp_mcp_rest_sensitive_routes', $rules, $method, $path );
+
+		foreach ( $rules as $pattern => $reason ) {
+			if ( preg_match( $pattern, $path ) ) {
+				return (string) $reason;
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * 设置页配置的允许命名空间(空数组 = 不限制)。
+	 *
+	 * @return string[]
+	 */
+	private function allowed_namespaces() {
+		$raw = trim( (string) get_option( 'wp_mcp_rest_namespaces', '' ) );
+		if ( '' === $raw ) {
+			return array();
+		}
+		$list = array_map(
+			function ( $ns ) {
+				return trim( $ns, '/ ' );
+			},
+			preg_split( '/[\s,]+/', $raw )
+		);
+		return array_values( array_filter( $list ) );
+	}
+
+	/**
+	 * 路由/路径是否在允许的命名空间内。
+	 *
+	 * @param string $route 路由或路径。
+	 * @return bool
+	 */
+	public function namespace_allowed( $route ) {
+		$allowed = $this->allowed_namespaces();
+		if ( empty( $allowed ) ) {
+			return true;
+		}
+		$route = '/' . ltrim( $route, '/' );
+		foreach ( $allowed as $ns ) {
+			if ( 0 === stripos( $route, '/' . $ns . '/' ) || 0 === strcasecmp( $route, '/' . $ns ) ) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/**
@@ -503,7 +632,7 @@ class WP_Rest_Tool extends Abstract_Tool {
 	 * @param string $route 路由或路径。
 	 * @return bool
 	 */
-	private function is_own_route( $route ) {
+	public function is_own_route( $route ) {
 		$own = '/' . trim( WP_MCP_REST_NAMESPACE, '/' );
 		return 0 === strpos( $route, $own . '/' ) || $route === $own;
 	}

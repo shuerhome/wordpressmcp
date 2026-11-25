@@ -108,8 +108,10 @@ class Registry {
 		foreach ( $this->tools as $tool ) {
 			$out[] = array(
 				'name'        => $tool->get_name(),
+				'title'       => $tool->get_title(),
 				'description' => $tool->get_description(),
 				'inputSchema' => $tool->get_input_schema(),
+				'annotations' => $tool->get_annotations(),
 			);
 		}
 		return $out;

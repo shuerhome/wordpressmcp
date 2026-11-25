@@ -93,6 +93,9 @@ class Settings {
 		if ( isset( $_POST['wp_mcp_ip_allowlist'] ) ) {
 			update_option( 'wp_mcp_ip_allowlist', sanitize_textarea_field( wp_unslash( $_POST['wp_mcp_ip_allowlist'] ) ) );
 		}
+		if ( isset( $_POST['wp_mcp_rest_namespaces'] ) ) {
+			update_option( 'wp_mcp_rest_namespaces', sanitize_textarea_field( wp_unslash( $_POST['wp_mcp_rest_namespaces'] ) ) );
+		}
 	}
 
 	/**
@@ -215,6 +218,13 @@ class Settings {
 						<th scope="row">IP 白名单(可选)</th>
 						<td>
 							<textarea name="wp_mcp_ip_allowlist" rows="3" class="large-text" placeholder="留空=不限制。多个 IP 用空格或逗号分隔"><?php echo esc_textarea( get_option( 'wp_mcp_ip_allowlist', '' ) ); ?></textarea>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row">REST 通道允许的命名空间(可选)</th>
+						<td>
+							<textarea name="wp_mcp_rest_namespaces" rows="2" class="large-text" placeholder="留空=不限制。例如只管店铺:wc/v3 wc-analytics wp/v2"><?php echo esc_textarea( get_option( 'wp_mcp_rest_namespaces', '' ) ); ?></textarea>
+							<p class="description">限制 wp_rest 能调用的接口范围,多个用空格或逗号分隔。商品图片和分类依赖 wp/v2,只管店铺时也建议保留。</p>
 						</td>
 					</tr>
 				</table>

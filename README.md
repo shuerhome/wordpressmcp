@@ -6,7 +6,7 @@
 
 ## 当前进度
 
-> **范围调整(未发布)**:已移除网站内容与设计类工具(文章页面、区块、Elementor、全局样式/模板、主题、评论、菜单、小工具),专注店铺运营与站点管理。保留 `wp_media`(商品图片)与 `wp_taxonomy`(商品分类/标签)。
+> **0.4.0 范围调整**:已移除网站内容与设计类工具(文章页面、区块、Elementor、全局样式/模板、主题、评论、菜单、小工具),专注店铺运营与站点管理。保留 `wp_media`(商品图片)与 `wp_taxonomy`(商品分类/标签)。
 > 新增通用 REST 通道 `wp_rest`,补齐专用工具未覆盖的 WooCommerce / WordPress / 第三方插件接口。
 
 **阶段 0(脚手架与协议层)**
@@ -45,10 +45,12 @@
 
 **阶段 5(通用 REST 通道)**
 - ✅ `wp_rest`:`namespaces` / `routes`(按命名空间或关键词查路由) / `describe`(查参数定义) / `call`(调用本站任意 REST 路由)
-  - 以绑定用户权限执行;非 GET 支持 `dry_run`,DELETE 需二次确认;客户 PII 默认脱敏(`reveal_pii` 解锁)
+  - 以绑定用户权限执行;非 GET 支持 `dry_run`;删除与敏感写操作需二次确认(见下文「写操作护栏」);客户 PII 默认脱敏(`reveal_pii` 解锁);API 密钥一律隐藏
   - 支持 `_fields` 精简返回、自动去掉 `_links`、超过 `max_bytes` 自动截断
   - 覆盖:商品图片/属性/变体、建单与改单、税率、支付网关、运费、评价、post meta、第三方插件接口等
-  - 设置页可关闭
+  - 设置页可关闭,并可限定允许的命名空间(如只放行 `wc/v3 wc-analytics wp/v2`)
+- ✅ `wp_media` 支持 base64 上传本地图片(`data` + `filename`,上限 10MB)
+- ✅ 多模型兼容:`tools/list` 带工具标题与 MCP 标注(只读 / 危险 / 访问站外);`initialize` 下发与厂商无关的使用说明
 
 > 工具总数:WordPress 8 个 + WooCommerce 9 个,经能力探测后按站点条件暴露。
 
@@ -135,6 +137,11 @@ curl -s -X POST https://你的站点/wp-json/mcp/v1/ \
   1. 先正常调用 → 返回 `confirmation_required` + 一个 `confirm_token`(5 分钟有效、绑定本次操作)。
   2. 取得用户确认后,带上该 `confirm_token` 再次调用 → 执行。
   - 受设置页「危险操作需二次确认」开关控制。
+- **需确认的操作**:
+  - 专用工具:各类 `delete`、`wc_orders refund`、`wp_users create/update/set_role`、`wp_plugins activate/deactivate/install/update`、`wc_webhooks create/update`、`wp_system options_set`
+  - `wp_rest`:所有 DELETE,以及对退款、批量(`/batch`)、用户、插件、主题、站点设置、支付网关、店铺设置、webhook、系统工具、客户账户的写操作。可用过滤器 `wp_mcp_rest_sensitive_routes` 增改规则
+- **密钥隐藏**:API 密钥、密码、签名密钥等一律返回 `[hidden]`,不提供解锁;写回时值为 `[hidden]` 的字段被忽略、保留原值。
+- **受保护选项**:`options_set` 拒绝修改站点地址、启用插件、主题、管理员邮箱、注册与默认角色、角色表、密钥盐值及本插件自身设置(过滤器 `wp_mcp_protected_options`)。
 
 ## 更新机制(自动更新已启用)
 
@@ -156,8 +163,13 @@ curl -s -X POST https://你的站点/wp-json/mcp/v1/ \
 - 默认仓库 `shuerhome/wordpressmcp`;如需改,在 `wp-config.php` 定义 `WP_MCP_UPDATE_REPO`。
 - 若日后改回私有:自动更新会失效(核心升级器下载源码包不带鉴权),届时改走手动上传 zip 升级。
 
-## 下一步(阶段 5:安全加固与分发)
+## 下一步
 
-审计日志落自定义表(替代滚动 option)、写操作记录前后值;调用限流;打包构建脚本输出
+- **0.5.0**:OAuth 登录(让 claude.ai 网页端、ChatGPT 等只接受 OAuth 的客户端可接入)、多令牌分级(只读/运营/完全管理)、调用限流、审计增强
+- **0.6.0**:工具说明中英双语、自动化测试与 CI、打包脚本
+
+已知限制:`wc_reports sales` 为毛销售额,未扣除退款;净额可用 `wp_rest` 调 `/wc-analytics/reports/revenue/stats`。
+
+原规划中的其他项:审计日志落自定义表(替代滚动 option)、写操作记录前后值;打包构建脚本输出
 可上传 `.zip`;自建私有插件更新服务器(5-10 站一处发版、各站自动提示升级)。
 可选阶段 6:跨站编排规范、SKU 身份映射、MCP Prompts 工作流。

@@ -160,7 +160,7 @@ class WC_Orders_Tool extends Abstract_Tool {
 	 */
 	private function set_status( $args ) {
 		$id    = (int) ( isset( $args['id'] ) ? $args['id'] : 0 );
-		$order = $id ? wc_get_order( $id ) : null;
+		$order = $id ? $this->find_order( $id ) : null;
 		if ( ! $order ) {
 			return new \WP_Error( 'wp_mcp_not_found', '未找到订单 ID:' . $id );
 		}
@@ -186,7 +186,7 @@ class WC_Orders_Tool extends Abstract_Tool {
 	 */
 	private function add_note( $args ) {
 		$id    = (int) ( isset( $args['id'] ) ? $args['id'] : 0 );
-		$order = $id ? wc_get_order( $id ) : null;
+		$order = $id ? $this->find_order( $id ) : null;
 		if ( ! $order ) {
 			return new \WP_Error( 'wp_mcp_not_found', '未找到订单 ID:' . $id );
 		}
@@ -212,7 +212,7 @@ class WC_Orders_Tool extends Abstract_Tool {
 	 */
 	private function refund( $args ) {
 		$id    = (int) ( isset( $args['id'] ) ? $args['id'] : 0 );
-		$order = $id ? wc_get_order( $id ) : null;
+		$order = $id ? $this->find_order( $id ) : null;
 		if ( ! $order ) {
 			return new \WP_Error( 'wp_mcp_not_found', '未找到订单 ID:' . $id );
 		}
@@ -255,7 +255,7 @@ class WC_Orders_Tool extends Abstract_Tool {
 	 */
 	private function update_order( $args ) {
 		$id    = (int) ( isset( $args['id'] ) ? $args['id'] : 0 );
-		$order = $id ? wc_get_order( $id ) : null;
+		$order = $id ? $this->find_order( $id ) : null;
 		if ( ! $order ) {
 			return new \WP_Error( 'wp_mcp_not_found', '未找到订单 ID:' . $id );
 		}
@@ -288,6 +288,7 @@ class WC_Orders_Tool extends Abstract_Tool {
 			'limit'    => $per_page,
 			'page'     => $page,
 			'paginate' => true,
+			'type'     => 'shop_order', // 排除退款记录(退款也是订单类型,混入会导致报错)。
 			'orderby'  => 'date',
 			'order'    => 'DESC',
 		);
@@ -330,7 +331,7 @@ class WC_Orders_Tool extends Abstract_Tool {
 	 */
 	private function get_order( $args ) {
 		$id    = (int) ( isset( $args['id'] ) ? $args['id'] : 0 );
-		$order = $id ? wc_get_order( $id ) : null;
+		$order = $id ? $this->find_order( $id ) : null;
 		if ( ! $order ) {
 			return new \WP_Error( 'wp_mcp_not_found', '未找到订单 ID:' . $id );
 		}
@@ -421,5 +422,16 @@ class WC_Orders_Tool extends Abstract_Tool {
 			return '<=' . $before;
 		}
 		return '';
+	}
+
+	/**
+	 * 取订单;退款记录等非订单对象视为不存在。
+	 *
+	 * @param int $id 订单 ID。
+	 * @return \WC_Order|null
+	 */
+	private function find_order( $id ) {
+		$order = wc_get_order( $id );
+		return $order instanceof \WC_Order ? $order : null;
 	}
 }

@@ -50,6 +50,7 @@ final class Plugin {
 	 */
 	private function __construct() {
 		$this->load_files();
+		self::maybe_upgrade();
 		$this->registry = new Registry();
 
 		// 注册 MCP 端点(REST 路由)。
@@ -76,6 +77,7 @@ final class Plugin {
 			'includes/safety/class-audit.php',
 			'includes/safety/class-pii.php',
 			'includes/safety/class-guard.php',
+			'includes/safety/class-secrets.php',
 			'includes/mcp/class-auth.php',
 			'includes/mcp/class-server.php',
 			'includes/mcp/class-transport.php',
@@ -108,7 +110,24 @@ final class Plugin {
 	}
 
 	/**
-	 * 激活:写入默认选项、把当前管理员绑为 MCP 用户。
+	 * 版本升级:更新器升级不会触发激活钩子,按已记录的版本执行一次性迁移。
+	 */
+	public static function maybe_upgrade() {
+		$from = (string) get_option( 'wp_mcp_db_version', '0' );
+		if ( version_compare( $from, WP_MCP_VERSION, '>=' ) ) {
+			return;
+		}
+
+		// 0.4.0:已移除设计类工具,清理其遗留的快照数据。
+		if ( version_compare( $from, '0.4.0', '<' ) ) {
+			delete_option( 'wp_mcp_design_backups' );
+		}
+
+		update_option( 'wp_mcp_db_version', WP_MCP_VERSION, false );
+	}
+
+	/**
+	 * 激活:写入默认设置。
 	 */
 	public static function on_activation() {
 		add_option( 'wp_mcp_enabled', 1 );

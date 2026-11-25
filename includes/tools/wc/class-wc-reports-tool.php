@@ -22,6 +22,13 @@ class WC_Reports_Tool extends Abstract_Tool {
 	/**
 	 * {@inheritDoc}
 	 */
+	protected function is_read_only() {
+		return true;
+	}
+
+	/**
+	 * {@inheritDoc}
+	 */
 	public function get_name() {
 		return 'wc_reports';
 	}
@@ -114,6 +121,7 @@ class WC_Reports_Tool extends Abstract_Tool {
 		return wc_get_orders(
 			array(
 				'limit'        => -1,
+				'type'         => 'shop_order', // 排除退款记录。
 				'status'       => $statuses,
 				'date_created' => $after . '...' . $before,
 				'return'       => 'objects',
