@@ -1,0 +1,38 @@
+# 每次推送与 PR:PHP 语法检查 + 打包检查 + 端到端测试(WordPress + WooCommerce,SQLite)。
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['7.4', '8.3']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: pdo_sqlite, sqlite3, mbstring, zip
+          coverage: none
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: PHP lint
+        run: find . -name '*.php' -not -path './tests/*' -print0 | xargs -0 -n1 php -l > /dev/null
+      - name: Build zip
+        run: bin/build-zip.sh
+      - name: Set up test site
+        run: tests/e2e/setup.sh "$RUNNER_TEMP/e2e"
+      - name: Run end-to-end tests
+        run: tests/e2e/run.sh "$RUNNER_TEMP/e2e"
+      - name: Show PHP log on failure
+        if: failure()
+        run: tail -n 200 "$RUNNER_TEMP/e2e/site/debug.log" || true

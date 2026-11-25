@@ -11,20 +11,13 @@ defined( 'ABSPATH' ) || exit;
 
 use WPMCP\Tools\Abstract_Tool;
 use WPMCP\Tools\WP\WP_Site_Tool;
-use WPMCP\Tools\WP\WP_Content_Tool;
 use WPMCP\Tools\WP\WP_Media_Tool;
-use WPMCP\Tools\WP\WP_Blocks_Tool;
-use WPMCP\Tools\WP\WP_Elementor_Tool;
-use WPMCP\Tools\WP\WP_Design_Tool;
-use WPMCP\Tools\WP\WP_Theme_Tool;
 use WPMCP\Tools\WP\WP_Taxonomy_Tool;
-use WPMCP\Tools\WP\WP_Comments_Tool;
 use WPMCP\Tools\WP\WP_Users_Tool;
 use WPMCP\Tools\WP\WP_Settings_Tool;
 use WPMCP\Tools\WP\WP_Plugins_Tool;
-use WPMCP\Tools\WP\WP_Menus_Tool;
-use WPMCP\Tools\WP\WP_Widgets_Tool;
 use WPMCP\Tools\WP\WP_System_Tool;
+use WPMCP\Tools\WP\WP_Rest_Tool;
 use WPMCP\Tools\WC\WC_Products_Tool;
 use WPMCP\Tools\WC\WC_Orders_Tool;
 use WPMCP\Tools\WC\WC_Reports_Tool;
@@ -53,23 +46,16 @@ class Registry {
 	public function __construct() {
 		// WordPress 工具(始终可用)。
 		$this->register( new WP_Site_Tool() );
-		$this->register( new WP_Content_Tool() );
 		$this->register( new WP_Media_Tool() );
-		$this->register( new WP_Blocks_Tool() );
-		$this->register( new WP_Design_Tool() );
-		$this->register( new WP_Theme_Tool() );
 		$this->register( new WP_Taxonomy_Tool() );
-		$this->register( new WP_Comments_Tool() );
 		$this->register( new WP_Users_Tool() );
 		$this->register( new WP_Settings_Tool() );
 		$this->register( new WP_Plugins_Tool() );
-		$this->register( new WP_Menus_Tool() );
-		$this->register( new WP_Widgets_Tool() );
 		$this->register( new WP_System_Tool() );
 
-		// Elementor 工具(仅在 Elementor 启用时暴露)。
-		if ( defined( 'ELEMENTOR_VERSION' ) ) {
-			$this->register( new WP_Elementor_Tool() );
+		// 通用 REST 通道(可在设置页关闭)。
+		if ( get_option( 'wp_mcp_enable_rest', 1 ) ) {
+			$this->register( new WP_Rest_Tool() );
 		}
 
 		// WooCommerce 工具(仅在 WC 启用时暴露)。
@@ -120,12 +106,45 @@ class Registry {
 	public function list_for_mcp() {
 		$out = array();
 		foreach ( $this->tools as $tool ) {
+			$en    = self::english_description( $tool->get_name() );
 			$out[] = array(
 				'name'        => $tool->get_name(),
-				'description' => $tool->get_description(),
+				'title'       => $tool->get_title(),
+				'description' => '' !== $en ? $en . "\n\n" . $tool->get_description() : $tool->get_description(),
 				'inputSchema' => $tool->get_input_schema(),
+				'annotations' => $tool->get_annotations(),
 			);
 		}
 		return $out;
+	}
+
+	/**
+	 * 工具的英文说明。
+	 *
+	 * @param string $name 工具名。
+	 * @return string
+	 */
+	public static function english_description( $name ) {
+		static $map = null;
+		if ( null === $map ) {
+			$map = include WP_MCP_DIR . 'includes/tools/descriptions-en.php';
+
+			/**
+			 * 过滤工具英文说明(第三方工具可在此补充)。
+			 *
+			 * @param array $map 工具名 => 英文说明。
+			 */
+			$map = apply_filters( 'wp_mcp_tool_descriptions_en', is_array( $map ) ? $map : array() );
+		}
+		return isset( $map[ $name ] ) ? (string) $map[ $name ] : '';
+	}
+
+	/**
+	 * 全部工具实例。
+	 *
+	 * @return Abstract_Tool[]
+	 */
+	public function all() {
+		return $this->tools;
 	}
 }

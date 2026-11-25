@@ -66,7 +66,8 @@ class WP_System_Tool extends Abstract_Tool {
 						'description' => 'options_get/options_set 的 option 名。',
 					),
 					'value'         => array(
-						'description' => 'options_set 的值(可为字符串/数字/布尔/对象)。',
+						'type'        => 'string',
+						'description' => 'options_set 的值。数组/对象请传 JSON 字符串,如 {"a":1}。',
 					),
 					'confirm_token' => array(
 						'type' => 'string',
@@ -244,9 +245,16 @@ class WP_System_Tool extends Abstract_Tool {
 		if ( '' === $option ) {
 			return new \WP_Error( 'wp_mcp_bad_args', 'options_get 需要 option。' );
 		}
+		$value = get_option( $option, null );
+		if ( \WPMCP\Safety\Secrets::is_secret_key( $option ) && is_scalar( $value ) && '' !== (string) $value ) {
+			$value = \WPMCP\Safety\Secrets::PLACEHOLDER;
+		} else {
+			$value = \WPMCP\Safety\Secrets::mask( $value );
+		}
+
 		return array(
 			'option' => $option,
-			'value'  => get_option( $option, null ),
+			'value'  => $value,
 		);
 	}
 
@@ -265,13 +273,88 @@ class WP_System_Tool extends Abstract_Tool {
 			return new \WP_Error( 'wp_mcp_bad_args', 'options_set 需要 value。' );
 		}
 
+		if ( $this->is_protected_option( $option ) ) {
+			return new \WP_Error(
+				'wp_mcp_protected_option',
+				sprintf( 'option「%s」受保护,改错可能导致整站无法访问或权限失控,请到后台对应页面修改。', $option )
+			);
+		}
+
+		$value = $args['value'];
+		// 复杂值可以 JSON 字符串传入。
+		if ( is_string( $value ) && preg_match( '/^\s*[\[{]/', $value ) ) {
+			$decoded = json_decode( $value, true );
+			if ( JSON_ERROR_NONE === json_last_error() ) {
+				$value = $decoded;
+			}
+		}
+		$stripped     = \WPMCP\Safety\Secrets::strip_placeholders( $value );
+		$had_hidden   = $stripped !== $value;
+		$value        = $stripped;
+		if ( \WPMCP\Safety\Secrets::PLACEHOLDER === $value ) {
+			return new \WP_Error( 'wp_mcp_bad_args', '值是 [hidden] 占位符,不能写入。' );
+		}
+		$args['value'] = $value;
+
 		$blocked = $this->guard( 'options_set', $args, sprintf( '写入 option「%s」', $option ) );
 		if ( null !== $blocked ) {
 			return $blocked;
 		}
 
-		$result = update_option( $option, $args['value'] );
+		// 含 [hidden] 占位符时与原值合并,保留被隐藏的原有密钥字段。
+		$current = get_option( $option, null );
+		if ( $had_hidden && is_array( $value ) && is_array( $current ) ) {
+			$value = array_replace_recursive( $current, $value );
+		}
+
+		$result = update_option( $option, $value );
 
 		return array( 'updated' => (bool) $result, 'option' => $option );
+	}
+
+	/**
+	 * 受保护的 option:改错会让站点无法访问、提权或破坏本插件的鉴权。
+	 *
+	 * @param string $option option 名。
+	 * @return bool
+	 */
+	private function is_protected_option( $option ) {
+		global $wpdb;
+		$option    = strtolower( $option );
+		$protected = array(
+			'siteurl',
+			'home',
+			'active_plugins',
+			'active_sitewide_plugins',
+			'template',
+			'stylesheet',
+			'admin_email',
+			'new_admin_email',
+			'users_can_register',
+			'default_role',
+			'cron',
+			'rewrite_rules',
+			'db_version',
+			'initial_db_version',
+			'auth_key',
+			'auth_salt',
+			'logged_in_key',
+			'logged_in_salt',
+			'nonce_key',
+			'nonce_salt',
+			'secure_auth_key',
+			'secure_auth_salt',
+			strtolower( $wpdb->prefix . 'user_roles' ),
+		);
+
+		/**
+		 * 过滤受保护的 option 列表。
+		 *
+		 * @param string[] $protected option 名。
+		 */
+		$protected = apply_filters( 'wp_mcp_protected_options', $protected );
+
+		// 本插件自己的设置(令牌、绑定用户、开关)也不允许经 MCP 修改。
+		return in_array( $option, $protected, true ) || 0 === strpos( $option, 'wp_mcp_' );
 	}
 }

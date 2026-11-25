@@ -50,10 +50,23 @@ final class Plugin {
 	 */
 	private function __construct() {
 		$this->load_files();
+		// 升级迁移需要用户等函数(pluggable),必须等 WordPress 加载完插件后再执行。
+		add_action( 'plugins_loaded', array( __CLASS__, 'maybe_upgrade' ), 1 );
 		$this->registry = new Registry();
 
 		// 注册 MCP 端点(REST 路由)。
 		add_action( 'rest_api_init', array( new Transport( $this->registry ), 'register_routes' ) );
+		Transport::register_cors();
+		add_action( 'rest_api_init', array( new \WPMCP\Mcp\OpenAPI( $this->registry ), 'register_routes' ) );
+
+		// OAuth 授权服务器与元数据(前台路径)。
+		( new \WPMCP\Mcp\OAuth() )->register();
+
+		// 审计日志按保留天数清理。
+		add_action( \WPMCP\Safety\Audit::CRON_HOOK, array( '\WPMCP\Safety\Audit', 'cleanup' ) );
+		if ( ! wp_next_scheduled( \WPMCP\Safety\Audit::CRON_HOOK ) ) {
+			wp_schedule_event( time() + HOUR_IN_SECONDS, 'daily', \WPMCP\Safety\Audit::CRON_HOOK );
+		}
 
 		// 私有更新(GitHub Releases)。
 		$repo = defined( 'WP_MCP_UPDATE_REPO' ) ? WP_MCP_UPDATE_REPO : 'shuerhome/wordpressmcp';
@@ -76,27 +89,25 @@ final class Plugin {
 			'includes/safety/class-audit.php',
 			'includes/safety/class-pii.php',
 			'includes/safety/class-guard.php',
-			'includes/safety/class-backup.php',
+			'includes/safety/class-secrets.php',
+			'includes/safety/class-rate-limit.php',
+			'includes/mcp/class-connections.php',
+			'includes/mcp/class-policy.php',
 			'includes/mcp/class-auth.php',
+			'includes/mcp/class-oauth.php',
+			'includes/mcp/class-openapi.php',
 			'includes/mcp/class-server.php',
 			'includes/mcp/class-transport.php',
 			'includes/update/class-updater.php',
 			'includes/tools/abstract-tool.php',
 			'includes/tools/wp/class-wp-site-tool.php',
-			'includes/tools/wp/class-wp-content-tool.php',
 			'includes/tools/wp/class-wp-media-tool.php',
-			'includes/tools/wp/class-wp-blocks-tool.php',
-			'includes/tools/wp/class-wp-elementor-tool.php',
-			'includes/tools/wp/class-wp-design-tool.php',
-			'includes/tools/wp/class-wp-theme-tool.php',
 			'includes/tools/wp/class-wp-taxonomy-tool.php',
-			'includes/tools/wp/class-wp-comments-tool.php',
 			'includes/tools/wp/class-wp-users-tool.php',
 			'includes/tools/wp/class-wp-settings-tool.php',
 			'includes/tools/wp/class-wp-plugins-tool.php',
-			'includes/tools/wp/class-wp-menus-tool.php',
-			'includes/tools/wp/class-wp-widgets-tool.php',
 			'includes/tools/wp/class-wp-system-tool.php',
+			'includes/tools/wp/class-wp-rest-tool.php',
 			'includes/tools/wc/class-wc-products-tool.php',
 			'includes/tools/wc/class-wc-orders-tool.php',
 			'includes/tools/wc/class-wc-reports-tool.php',
@@ -116,11 +127,54 @@ final class Plugin {
 	}
 
 	/**
-	 * 激活:写入默认选项、把当前管理员绑为 MCP 用户。
+	 * 版本升级:更新器升级不会触发激活钩子,按已记录的版本执行一次性迁移。
+	 */
+	public static function maybe_upgrade() {
+		$from = (string) get_option( 'wp_mcp_db_version', '0' );
+		if ( version_compare( $from, WP_MCP_VERSION, '>=' ) ) {
+			return;
+		}
+
+		// 数据表(dbDelta 可重复执行,每次版本变化都校准一次表结构)。
+		\WPMCP\Mcp\Connections::install();
+		\WPMCP\Mcp\OAuth::install();
+		\WPMCP\Safety\Audit::install();
+
+		// 0.4.0:已移除设计类工具,清理其遗留的快照数据。
+		if ( version_compare( $from, '0.4.0', '<' ) ) {
+			delete_option( 'wp_mcp_design_backups' );
+		}
+
+		// 0.5.0:单令牌迁移为一条「完全管理」连接(原令牌继续可用);旧审计改存数据表。
+		if ( version_compare( $from, '0.5.0', '<' ) ) {
+			$legacy = (string) get_option( 'wp_mcp_token_hash', '' );
+			if ( '' !== $legacy ) {
+				$user = (int) get_option( 'wp_mcp_bound_user', 0 );
+				if ( ! $user || ! user_can( $user, 'manage_options' ) ) {
+					$admins = get_users( array( 'role' => 'administrator', 'number' => 1, 'fields' => 'ID' ) );
+					$user   = $admins ? (int) $admins[0] : 0;
+				}
+				if ( $user ) {
+					\WPMCP\Mcp\Connections::import_static_hash( '旧令牌(0.5.0 升级前生成)', $legacy, $user );
+					delete_option( 'wp_mcp_token_hash' );
+				}
+			}
+			delete_option( 'wp_mcp_audit_log' );
+		}
+
+		update_option( 'wp_mcp_db_version', WP_MCP_VERSION, false );
+	}
+
+	/**
+	 * 激活:写入默认设置。
 	 */
 	public static function on_activation() {
+		self::maybe_upgrade();
 		add_option( 'wp_mcp_enabled', 1 );
 		add_option( 'wp_mcp_require_confirm', 1 );
+		add_option( 'wp_mcp_enable_rest', 1 );
+		add_option( 'wp_mcp_oauth_enabled', 1 );
+		add_option( 'wp_mcp_oauth_dcr', 1 );
 		add_option( 'wp_mcp_mask_pii', 1 );
 		add_option( 'wp_mcp_audit', 1 );
 		add_option( 'wp_mcp_ip_allowlist', '' );
@@ -137,5 +191,7 @@ final class Plugin {
 	/**
 	 * 停用:无需清理(保留令牌与设置)。
 	 */
-	public static function on_deactivation() {}
+	public static function on_deactivation() {
+		wp_clear_scheduled_hook( \WPMCP\Safety\Audit::CRON_HOOK );
+	}
 }

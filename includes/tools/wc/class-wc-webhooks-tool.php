@@ -19,6 +19,13 @@ class WC_Webhooks_Tool extends Abstract_Tool {
 	/**
 	 * {@inheritDoc}
 	 */
+	protected function is_open_world() {
+		return true;
+	}
+
+	/**
+	 * {@inheritDoc}
+	 */
 	public function get_name() {
 		return 'wc_webhooks';
 	}
@@ -41,7 +48,7 @@ class WC_Webhooks_Tool extends Abstract_Tool {
 	 * {@inheritDoc}
 	 */
 	protected function destructive_actions() {
-		return array( 'delete' );
+		return array( 'create', 'update', 'delete' );
 	}
 
 	/**
@@ -157,7 +164,7 @@ class WC_Webhooks_Tool extends Abstract_Tool {
 		}
 
 		$data                 = $this->summarize_webhook( $webhook );
-		$data['secret']       = $webhook->get_secret();
+		$data['secret']       = '' !== (string) $webhook->get_secret() ? \WPMCP\Safety\Secrets::PLACEHOLDER : '';
 		$data['failure_count'] = $webhook->get_failure_count();
 		return $data;
 	}
@@ -226,7 +233,7 @@ class WC_Webhooks_Tool extends Abstract_Tool {
 		if ( isset( $args['status'] ) ) {
 			$webhook->set_status( sanitize_key( $args['status'] ) );
 		}
-		if ( isset( $args['secret'] ) ) {
+		if ( isset( $args['secret'] ) && \WPMCP\Safety\Secrets::PLACEHOLDER !== $args['secret'] ) {
 			$webhook->set_secret( (string) $args['secret'] );
 		}
 		$webhook->save();

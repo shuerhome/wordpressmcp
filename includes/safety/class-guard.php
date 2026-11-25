@@ -39,6 +39,11 @@ class Guard {
 			$stored = get_transient( $key );
 			if ( $stored && hash_equals( $stored, $signature ) ) {
 				delete_transient( $key ); // 一次性消费。
+				$conn  = \WPMCP\Mcp\Auth::current();
+				$quota = Rate_Limit::hit_dangerous( $conn ? 'c' . (int) $conn->id . '_u' . (int) $conn->user_id : 'u' . get_current_user_id() );
+				if ( is_wp_error( $quota ) ) {
+					return array( 'error' => $quota->get_error_message() );
+				}
 				return null;
 			}
 			return array(
@@ -71,6 +76,9 @@ class Guard {
 		$relevant = $args;
 		unset( $relevant['confirm_token'], $relevant['dry_run'] );
 		ksort( $relevant );
-		return md5( $tool . '|' . $action . '|' . wp_json_encode( $relevant ) );
+		// 绑定到当前连接与用户:一个连接拿到的确认令牌不能被另一个连接使用。
+		$conn  = \WPMCP\Mcp\Auth::current();
+		$owner = ( $conn ? (int) $conn->id : 0 ) . ':' . get_current_user_id();
+		return hash( 'sha256', $owner . '|' . $tool . '|' . $action . '|' . wp_json_encode( $relevant ) );
 	}
 }

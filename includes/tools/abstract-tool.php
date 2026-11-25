@@ -76,11 +76,7 @@ abstract class Abstract_Tool {
 
 		$result = $this->run( $action, $args );
 
-		Audit::log(
-			$this->get_name(),
-			$args,
-			is_wp_error( $result ) ? 'error' : 'success'
-		);
+		Audit::log( $this->get_name(), $args, Audit::result_of( $result ), is_wp_error( $result ) ? $result->get_error_message() : '' );
 
 		return $result;
 	}
@@ -131,6 +127,66 @@ abstract class Abstract_Tool {
 		}
 
 		return null;
+	}
+
+	/**
+	 * 该工具是否只读(所有 action 都不改数据)。子类按需覆盖。
+	 *
+	 * @return bool
+	 */
+	protected function is_read_only() {
+		return false;
+	}
+
+	/**
+	 * 该工具是否会访问站外资源(下载文件、连接插件目录、向外发送数据)。子类按需覆盖。
+	 *
+	 * @return bool
+	 */
+	protected function is_open_world() {
+		return false;
+	}
+
+	/**
+	 * MCP 工具标注(annotations):供客户端判断是否需要先请用户确认。
+	 *
+	 * 一个工具包含多个 action,标注按「最危险的 action」给出;
+	 * 具体哪些 action 需二次确认由服务端的 confirm_token 机制保证。
+	 *
+	 * @return array
+	 */
+	public function get_annotations() {
+		$read_only = $this->is_read_only();
+		$out       = array(
+			'title'           => $this->get_title(),
+			'readOnlyHint'    => $read_only,
+			'openWorldHint'   => $this->is_open_world(),
+		);
+		if ( ! $read_only ) {
+			$out['destructiveHint'] = ! empty( $this->destructive_actions() );
+			$out['idempotentHint']  = false;
+		}
+		return $out;
+	}
+
+	/**
+	 * 给人看的工具标题(英文,便于各家客户端显示)。
+	 *
+	 * @return string
+	 */
+	public function get_title() {
+		$name  = $this->get_name();
+		$words = explode( '_', $name );
+		$map   = array(
+			'wp' => 'WordPress',
+			'wc' => 'WooCommerce',
+			'rest' => 'REST API',
+		);
+		$out = array();
+		foreach ( $words as $w ) {
+			$out[] = isset( $map[ $w ] ) ? $map[ $w ] : ucfirst( $w );
+		}
+		return implode( ' ', $out );
 	}
 
 	/**

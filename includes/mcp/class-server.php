@@ -91,7 +91,11 @@ class Server {
 				return $this->result_response( $id, new \stdClass() );
 
 			case 'tools/list':
-				return $this->result_response( $id, array( 'tools' => $this->registry->list_for_mcp() ) );
+				$tools = $this->registry->list_for_mcp();
+				if ( Auth::tier() ) {
+					$tools = Policy::filter_tools( Auth::tier(), $tools );
+				}
+				return $this->result_response( $id, array( 'tools' => $tools ) );
 
 			case 'tools/call':
 				return $this->tools_call( $id, $params );
@@ -131,7 +135,41 @@ class Server {
 				'name'    => 'wp-mcp',
 				'version' => WP_MCP_VERSION,
 			),
+			'instructions'    => $this->instructions(),
 		);
+	}
+
+	/**
+	 * 给客户端模型的通用使用说明(不依赖具体模型厂商)。
+	 *
+	 * @return string
+	 */
+	private function instructions() {
+		$text = 'This server controls a WordPress site'
+			. ( $this->registry->get( 'wc_products' ) ? ' with WooCommerce' : '' )
+			. '. Every tool takes an "action" argument; see each tool description for its actions. '
+			. 'Start with wp_site (action=capabilities) to learn what this site supports. '
+			. 'Prefer the dedicated wp_* / wc_* tools for common tasks. ';
+
+		$conn = Auth::current();
+		if ( $conn ) {
+			$labels = array(
+				Connections::TIER_READ => 'read-only (no changes allowed)',
+				Connections::TIER_OPS  => 'operations (products, inventory, orders without refunds, coupons, customers, product media and categories)',
+				Connections::TIER_FULL => 'full administration',
+			);
+			$text .= 'This connection\'s permission level is ' . $labels[ $conn->effective_tier ] . '; calls outside it are rejected. ';
+		}
+
+		if ( $this->registry->get( 'wp_rest' ) ) {
+			$text .= 'For anything they do not cover, use wp_rest: action=routes to find a REST route, action=describe to see its parameters, action=call to invoke it. ';
+		}
+
+		$text .= 'Write actions accept dry_run=true to preview without changing anything. '
+			. 'Destructive actions return confirmation_required with a confirm_token: ask the user to confirm, then repeat the same call with that confirm_token. '
+			. 'Customer personal data is masked by default in the dedicated tools.';
+
+		return $text;
 	}
 
 	/**
@@ -145,12 +183,11 @@ class Server {
 		$name = isset( $params['name'] ) ? (string) $params['name'] : '';
 		$args = isset( $params['arguments'] ) && is_array( $params['arguments'] ) ? $params['arguments'] : array();
 
-		$tool = $this->registry->get( $name );
-		if ( ! $tool ) {
+		if ( ! $this->registry->get( $name ) ) {
 			return $this->error_response( $id, -32602, '未知工具:' . $name );
 		}
 
-		$result = $tool->execute( $args );
+		$result = self::run_tool( $this->registry, $name, $args );
 
 		if ( is_wp_error( $result ) ) {
 			// 工具级错误:以 isError 形式返回(非协议错误)。
@@ -183,6 +220,41 @@ class Server {
 				'isError'           => false,
 			)
 		);
+	}
+
+	/**
+	 * 执行一次工具调用:权限级别、限流(服务端强制)→ 执行 → 审计。
+	 *
+	 * MCP 的 tools/call 与 OpenAPI 的 /tools/{name} 共用此逻辑。
+	 *
+	 * @param Registry $registry 注册表。
+	 * @param string   $name     工具名。
+	 * @param array    $args     入参。
+	 * @return array|\WP_Error
+	 */
+	public static function run_tool( Registry $registry, $name, $args ) {
+		$tool = $registry->get( $name );
+		if ( ! $tool ) {
+			return new \WP_Error( 'wp_mcp_unknown_tool', '未知工具:' . $name );
+		}
+
+		$action = isset( $args['action'] ) ? (string) $args['action'] : '';
+		$conn   = Auth::current();
+		if ( $conn ) {
+			$allowed = Policy::check( $conn->effective_tier, $name, $action, $args );
+			if ( true === $allowed && Connections::TIER_READ === $conn->effective_tier ) {
+				unset( $args['reveal_pii'] ); // 只读连接不能解锁客户个人信息。
+			}
+			if ( true === $allowed ) {
+				$allowed = \WPMCP\Safety\Rate_Limit::hit_call( 'c' . (int) $conn->id . '_u' . (int) $conn->user_id, Policy::is_write( $name, $action, $args ) );
+			}
+			if ( is_wp_error( $allowed ) ) {
+				\WPMCP\Safety\Audit::log( $name, $args, 'denied', $allowed->get_error_message() );
+				return $allowed;
+			}
+		}
+
+		return $tool->execute( $args );
 	}
 
 	/**
