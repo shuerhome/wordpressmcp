@@ -183,31 +183,11 @@ class Server {
 		$name = isset( $params['name'] ) ? (string) $params['name'] : '';
 		$args = isset( $params['arguments'] ) && is_array( $params['arguments'] ) ? $params['arguments'] : array();
 
-		$tool = $this->registry->get( $name );
-		if ( ! $tool ) {
+		if ( ! $this->registry->get( $name ) ) {
 			return $this->error_response( $id, -32602, '未知工具:' . $name );
 		}
 
-		// 权限级别与限流(服务端强制)。
-		$action = isset( $args['action'] ) ? (string) $args['action'] : '';
-		$conn   = Auth::current();
-		if ( $conn ) {
-			$allowed = Policy::check( $conn->effective_tier, $name, $action, $args );
-			if ( true === $allowed && Connections::TIER_READ === $conn->effective_tier ) {
-				unset( $args['reveal_pii'] ); // 只读连接不能解锁客户个人信息。
-			}
-			if ( true === $allowed ) {
-				$allowed = \WPMCP\Safety\Rate_Limit::hit_call( 'c' . (int) $conn->id . '_u' . (int) $conn->user_id, Policy::is_write( $name, $action, $args ) );
-			}
-			if ( is_wp_error( $allowed ) ) {
-				\WPMCP\Safety\Audit::log( $name, $args, 'denied', $allowed->get_error_message() );
-				$result = $allowed;
-			}
-		}
-
-		if ( ! isset( $result ) ) {
-			$result = $tool->execute( $args );
-		}
+		$result = self::run_tool( $this->registry, $name, $args );
 
 		if ( is_wp_error( $result ) ) {
 			// 工具级错误:以 isError 形式返回(非协议错误)。
@@ -240,6 +220,41 @@ class Server {
 				'isError'           => false,
 			)
 		);
+	}
+
+	/**
+	 * 执行一次工具调用:权限级别、限流(服务端强制)→ 执行 → 审计。
+	 *
+	 * MCP 的 tools/call 与 OpenAPI 的 /tools/{name} 共用此逻辑。
+	 *
+	 * @param Registry $registry 注册表。
+	 * @param string   $name     工具名。
+	 * @param array    $args     入参。
+	 * @return array|\WP_Error
+	 */
+	public static function run_tool( Registry $registry, $name, $args ) {
+		$tool = $registry->get( $name );
+		if ( ! $tool ) {
+			return new \WP_Error( 'wp_mcp_unknown_tool', '未知工具:' . $name );
+		}
+
+		$action = isset( $args['action'] ) ? (string) $args['action'] : '';
+		$conn   = Auth::current();
+		if ( $conn ) {
+			$allowed = Policy::check( $conn->effective_tier, $name, $action, $args );
+			if ( true === $allowed && Connections::TIER_READ === $conn->effective_tier ) {
+				unset( $args['reveal_pii'] ); // 只读连接不能解锁客户个人信息。
+			}
+			if ( true === $allowed ) {
+				$allowed = \WPMCP\Safety\Rate_Limit::hit_call( 'c' . (int) $conn->id . '_u' . (int) $conn->user_id, Policy::is_write( $name, $action, $args ) );
+			}
+			if ( is_wp_error( $allowed ) ) {
+				\WPMCP\Safety\Audit::log( $name, $args, 'denied', $allowed->get_error_message() );
+				return $allowed;
+			}
+		}
+
+		return $tool->execute( $args );
 	}
 
 	/**

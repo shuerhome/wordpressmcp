@@ -106,14 +106,45 @@ class Registry {
 	public function list_for_mcp() {
 		$out = array();
 		foreach ( $this->tools as $tool ) {
+			$en    = self::english_description( $tool->get_name() );
 			$out[] = array(
 				'name'        => $tool->get_name(),
 				'title'       => $tool->get_title(),
-				'description' => $tool->get_description(),
+				'description' => '' !== $en ? $en . "\n\n" . $tool->get_description() : $tool->get_description(),
 				'inputSchema' => $tool->get_input_schema(),
 				'annotations' => $tool->get_annotations(),
 			);
 		}
 		return $out;
+	}
+
+	/**
+	 * 工具的英文说明。
+	 *
+	 * @param string $name 工具名。
+	 * @return string
+	 */
+	public static function english_description( $name ) {
+		static $map = null;
+		if ( null === $map ) {
+			$map = include WP_MCP_DIR . 'includes/tools/descriptions-en.php';
+
+			/**
+			 * 过滤工具英文说明(第三方工具可在此补充)。
+			 *
+			 * @param array $map 工具名 => 英文说明。
+			 */
+			$map = apply_filters( 'wp_mcp_tool_descriptions_en', is_array( $map ) ? $map : array() );
+		}
+		return isset( $map[ $name ] ) ? (string) $map[ $name ] : '';
+	}
+
+	/**
+	 * 全部工具实例。
+	 *
+	 * @return Abstract_Tool[]
+	 */
+	public function all() {
+		return $this->tools;
 	}
 }

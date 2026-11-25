@@ -4,7 +4,7 @@ Tags: mcp, claude, ai, woocommerce, rest-api
 Requires at least: 5.9
 Tested up to: 6.8
 Requires PHP: 7.4
-Stable tag: 0.5.0
+Stable tag: 0.6.0
 License: GPLv2 or later
 
 把本站变成一个 MCP 服务器,让 Claude 通过站点 URL 精细控制 WordPress / WooCommerce。
@@ -37,6 +37,17 @@ License: GPLv2 or later
      Claude Code:`claude mcp add --transport http 站点名 https://你的站点/wp-json/mcp/v1/rpc --header "Authorization: Bearer <令牌>"`
 
 == Changelog ==
+
+= 0.6.0 =
+* 新增 OpenAPI 接口,让不支持 MCP 的平台也能接入:GET /wp-json/mcp/v1/openapi.json 为 OpenAPI 3.0 文档(每个工具一个操作),
+  POST /wp-json/mcp/v1/tools/{工具名} 调用工具。适用于 GPT 自定义操作(Actions)、Dify、Coze、n8n,以及用各家模型 API 的函数调用自建 Agent。
+  鉴权、权限级别、限流、确认机制、审计与 MCP 完全一致。
+* 后台新增「新建 OAuth 应用」,用于要求手动填写 Client ID / Secret 的平台(如 GPT Actions)。
+* 工具说明改为中英双语(英文在前),便于非中文模型理解;OpenAPI 文档使用英文说明并控制在 300 字以内。
+* 新增打包脚本 bin/build-zip.sh(校验三处版本号一致,输出只含插件文件的安装包)与 GitHub Actions:
+  推送 v* tag 自动打包并创建 Release;每次推送与 PR 在 PHP 7.4 / 8.3 上跑语法检查与端到端测试。
+* 端到端测试移入仓库 tests/e2e:自动搭建 WordPress + WooCommerce(SQLite)测试站,共 134 项检查。
+
 
 = 0.5.0 =
 * 新增 OAuth 2.1 登录(按 MCP 授权规范):claude.ai 网页端、Claude 桌面版、ChatGPT、Gemini、Cursor、VS Code 等支持 OAuth 的客户端只需填端点 URL,

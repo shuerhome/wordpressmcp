@@ -1,0 +1,25 @@
+# 推送 v* tag 时:校验版本号 → 打包 → 创建 GitHub Release 并附上安装包。
+# 注意:Release 一旦发布,所有装了本插件的站点都会收到更新提示。
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Build plugin zip
+        id: build
+        run: echo "zip=$(bin/build-zip.sh "$GITHUB_REF_NAME")" >> "$GITHUB_OUTPUT"
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" "${{ steps.build.outputs.zip }}" --title "$GITHUB_REF_NAME" --generate-notes

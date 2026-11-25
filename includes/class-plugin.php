@@ -57,6 +57,7 @@ final class Plugin {
 		// 注册 MCP 端点(REST 路由)。
 		add_action( 'rest_api_init', array( new Transport( $this->registry ), 'register_routes' ) );
 		Transport::register_cors();
+		add_action( 'rest_api_init', array( new \WPMCP\Mcp\OpenAPI( $this->registry ), 'register_routes' ) );
 
 		// OAuth 授权服务器与元数据(前台路径)。
 		( new \WPMCP\Mcp\OAuth() )->register();
@@ -94,6 +95,7 @@ final class Plugin {
 			'includes/mcp/class-policy.php',
 			'includes/mcp/class-auth.php',
 			'includes/mcp/class-oauth.php',
+			'includes/mcp/class-openapi.php',
 			'includes/mcp/class-server.php',
 			'includes/mcp/class-transport.php',
 			'includes/update/class-updater.php',

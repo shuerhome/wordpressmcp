@@ -23,7 +23,8 @@ class Settings {
 
 	const PAGE_SLUG    = 'wp-mcp';
 	const NONCE_ACTION = 'wp_mcp_settings';
-	const NEW_TOKEN_TR = 'wp_mcp_new_token_';
+	const NEW_TOKEN_TR  = 'wp_mcp_new_token_';
+	const NEW_CLIENT_TR = 'wp_mcp_new_client_';
 
 	/**
 	 * 注册菜单。
@@ -78,6 +79,23 @@ class Settings {
 				if ( $id ) {
 					Connections::revoke( $id );
 				}
+				break;
+
+			case 'create_client':
+				$cname = isset( $_POST['client_name'] ) ? sanitize_text_field( wp_unslash( $_POST['client_name'] ) ) : '';
+				$curis = isset( $_POST['client_redirects'] ) ? array_values( array_filter( array_map( 'trim', preg_split( '/[\s,]+/', sanitize_textarea_field( wp_unslash( $_POST['client_redirects'] ) ) ) ) ) ) : array();
+				$bad   = array_filter(
+					$curis,
+					function ( $u ) {
+						return ! OAuth::redirect_uri_valid( $u );
+					}
+				);
+				if ( '' === $cname || empty( $curis ) || $bad ) {
+					$redirect_args = array( 'page' => self::PAGE_SLUG, 'error' => rawurlencode( '请填写应用名称与有效的回调地址(https、本机 http 或应用协议)。' . ( $bad ? '无效:' . implode( ' ', $bad ) : '' ) ) );
+					break;
+				}
+				list( $new_id, $new_secret ) = OAuth::create_client( mb_substr( $cname, 0, 100 ), $curis, 'client_secret_post', true );
+				set_transient( self::NEW_CLIENT_TR . get_current_user_id(), array( $new_id, $new_secret ), 120 );
 				break;
 
 			case 'delete_client':
@@ -198,6 +216,10 @@ class Settings {
 		if ( $new_token ) {
 			delete_transient( $tr_key );
 		}
+		$new_client = get_transient( self::NEW_CLIENT_TR . get_current_user_id() );
+		if ( $new_client ) {
+			delete_transient( self::NEW_CLIENT_TR . get_current_user_id() );
+		}
 		$snapshot    = Detector::snapshot();
 		$tiers       = Connections::tiers();
 		$connections = Connections::active();
@@ -231,6 +253,20 @@ class Settings {
 				</div>
 			<?php endif; ?>
 
+			<?php if ( $new_client ) : ?>
+				<div class="notice notice-warning" style="padding:12px;">
+					<p><strong>OAuth 应用已创建,密钥仅显示这一次:</strong></p>
+					<table class="form-table">
+						<tr><th>Client ID</th><td><code><?php echo esc_html( $new_client[0] ); ?></code></td></tr>
+						<tr><th>Client Secret</th><td><code style="background:#fff3cd;"><?php echo esc_html( $new_client[1] ); ?></code></td></tr>
+						<tr><th>Authorization URL</th><td><code><?php echo esc_html( OAuth::endpoint( 'authorize' ) ); ?></code></td></tr>
+						<tr><th>Token URL</th><td><code><?php echo esc_html( OAuth::endpoint( 'token' ) ); ?></code></td></tr>
+						<tr><th>Scope</th><td><code>mcp:ops</code>(或 mcp:read / mcp:full;授权页上可再选)</td></tr>
+						<tr><th>Token 认证方式</th><td>POST 请求体(client_secret_post)或 Basic 头均可</td></tr>
+					</table>
+				</div>
+			<?php endif; ?>
+
 			<h2>如何连接</h2>
 			<table class="form-table">
 				<tr>
@@ -249,6 +285,14 @@ class Settings {
 					<td>
 						<p>适用于可填写请求头的客户端(Claude Code、脚本、自建 Agent 等):在下方「新建令牌」生成后,按提示配置 <code>Authorization: Bearer &lt;令牌&gt;</code>。</p>
 						<p class="description">不能填请求头的客户端也可把令牌拼在 URL 上(<code>?token=</code>),但令牌易被日志留存,建议配合 IP 白名单。</p>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row">C. OpenAPI(不支持 MCP 的平台)</th>
+					<td>
+						<p>适用于 GPT 自定义操作(Actions)、Dify、Coze、n8n,或用各家模型 API 的函数调用自建 Agent:导入下面的 OpenAPI 文档,鉴权选 Bearer(手动令牌)或 OAuth。权限、限流、确认、审计与 MCP 完全一致。</p>
+						<code style="display:block;padding:8px;background:#f6f7f7;"><?php echo esc_html( rest_url( WP_MCP_REST_NAMESPACE . '/openapi.json' ) ); ?></code>
+						<p class="description">平台需要手动填写 OAuth 客户端信息时(如 GPT Actions),在下方「新建 OAuth 应用」创建,回调地址填平台给出的 callback URL。</p>
 					</td>
 				</tr>
 			</table>
@@ -330,6 +374,18 @@ class Settings {
 					</tr>
 				</table>
 				<?php submit_button( '生成令牌', 'secondary' ); ?>
+			</form>
+
+			<h3>新建 OAuth 应用(手动)</h3>
+			<p class="description">仅在平台不支持自动注册、要求你填写 Client ID / Secret 时使用(如 GPT Actions)。支持自动注册的客户端无需这一步。</p>
+			<form method="post">
+				<?php wp_nonce_field( self::NONCE_ACTION ); ?>
+				<input type="hidden" name="wp_mcp_action" value="create_client" />
+				<table class="form-table">
+					<tr><th scope="row">应用名称</th><td><input type="text" name="client_name" class="regular-text" placeholder="例如:我的 GPT" maxlength="100" required /></td></tr>
+					<tr><th scope="row">回调地址</th><td><textarea name="client_redirects" rows="2" class="large-text" placeholder="平台提供的 OAuth callback URL,多个用空格或换行分隔" required></textarea></td></tr>
+				</table>
+				<?php submit_button( '创建 OAuth 应用', 'secondary' ); ?>
 			</form>
 
 			<?php $clients = OAuth::clients(); ?>

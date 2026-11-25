@@ -550,19 +550,7 @@ input[type=text]{width:100%;box-sizing:border-box;padding:8px;border:1px solid #
 			$this->oauth_error( 'access_denied', '已注册的客户端过多,请联系站点管理员清理。', 503 );
 		}
 
-		$client_id = 'mcpc_' . wp_generate_password( 32, false, false );
-		$secret    = 'none' === $method ? '' : 'mcps_' . wp_generate_password( 48, false, false );
-		$wpdb->insert(
-			self::clients_table(),
-			array(
-				'client_id'     => $client_id,
-				'secret_hash'   => '' === $secret ? '' : Connections::hash( $secret ),
-				'auth_method'   => $method,
-				'name'          => $name,
-				'redirect_uris' => wp_json_encode( $uris ),
-				'created_at'    => current_time( 'mysql', true ),
-			)
-		);
+		list( $client_id, $secret ) = self::create_client( $name, $uris, $method );
 
 		$out = array(
 			'client_id'                  => $client_id,
@@ -580,6 +568,35 @@ input[type=text]{width:100%;box-sizing:border-box;padding:8px;border:1px solid #
 		}
 		header( 'Cache-Control: no-store' );
 		$this->json( $out, 201 );
+	}
+
+	/**
+	 * 新建客户端记录。
+	 *
+	 * @param string   $name   名称。
+	 * @param string[] $uris   回跳地址(调用方已校验)。
+	 * @param string   $method none / client_secret_post / client_secret_basic。
+	 * @param bool     $manual 后台手动创建(不会被自动清理)。
+	 * @return array{0:string,1:string} client_id 与明文 secret(公开客户端为空)。
+	 */
+	public static function create_client( $name, $uris, $method, $manual = false ) {
+		global $wpdb;
+		$client_id = 'mcpc_' . wp_generate_password( 32, false, false );
+		$secret    = 'none' === $method ? '' : 'mcps_' . wp_generate_password( 48, false, false );
+		$wpdb->insert(
+			self::clients_table(),
+			array(
+				'client_id'     => $client_id,
+				'secret_hash'   => '' === $secret ? '' : Connections::hash( $secret ),
+				'auth_method'   => $method,
+				'name'          => $name,
+				'redirect_uris' => wp_json_encode( array_values( $uris ) ),
+				'created_at'    => current_time( 'mysql', true ),
+				// 手动创建的应用标记为「已使用」,避免被 24 小时清理规则删除。
+				'last_used_at'  => $manual ? current_time( 'mysql', true ) : null,
+			)
+		);
+		return array( $client_id, $secret );
 	}
 
 	/**

@@ -58,6 +58,12 @@
 - ✅ 限流:每连接每分钟读/写上限、每日危险操作上限
 - ✅ 审计:独立数据表,记录连接与 IP,可筛选、导出 CSV,按天数自动清理
 
+**阶段 7(更多平台与工程化,0.6.0)**
+- ✅ OpenAPI 接口(文档 + 工具调用端点),供不支持 MCP 的平台与自建 Agent 使用
+- ✅ 手动创建 OAuth 应用(GPT Actions 等)
+- ✅ 工具说明中英双语
+- ✅ 打包脚本、自动发版、CI 端到端测试(PHP 7.4 / 8.3)
+
 > 工具总数:WordPress 8 个 + WooCommerce 9 个,经能力探测后按站点条件暴露。
 
 ## 目录结构
@@ -112,6 +118,16 @@ claude mcp add --transport http mysite https://你的站点/wp-json/mcp/v1/rpc -
 
 其他客户端的通用配置:`{ "url": "https://你的站点/wp-json/mcp/v1/rpc", "headers": { "Authorization": "Bearer <令牌>" } }`。
 实在不能填请求头时可用 `?token=<令牌>`(仅限手动令牌,易被日志留存)。
+
+### C. OpenAPI — 不支持 MCP 的平台(GPT 自定义操作、Dify、Coze、n8n、自建 Agent)
+
+- 文档:`https://你的站点/wp-json/mcp/v1/openapi.json`(OpenAPI 3.0,每个工具一个操作)
+- 调用:`POST https://你的站点/wp-json/mcp/v1/tools/<工具名>`,请求体就是工具参数,如 `{"action":"list","per_page":10}`
+- 返回:成功 `{"ok":true,"result":...}`;出错 `{"ok":false,"error":"..."}`(越权 403、限流 429、参数错 400)
+- 鉴权:`Authorization: Bearer <手动令牌>`,或 OAuth。平台要求手动填写 OAuth 信息时(如 GPT Actions),在「设置 → WP MCP → 新建 OAuth 应用」创建,回调地址填平台提供的 callback URL
+- 用模型 API 自建 Agent 时,可把 openapi.json 中每个操作的 requestBody schema 直接作为函数(工具)定义
+
+权限、限流、二次确认、审计与 MCP 完全一致。
 
 ### 权限级别
 
@@ -182,12 +198,23 @@ curl -s -X POST https://你的站点/wp-json/mcp/v1/ \
 
 ### 发版流程
 
-1. 改好代码,把 [wp-mcp.php](wp-mcp.php) 与 [readme.txt](readme.txt) 的版本号一起 bump(如 `0.2.0`)。
-2. 提交并推送到 `main`。
-3. 打 tag 并发布 Release:tag 形如 `v0.2.0`(`v` 前缀会被自动去掉)。
+1. 把 [wp-mcp.php](wp-mcp.php)(插件头 `Version` 与 `WP_MCP_VERSION`)与 [readme.txt](readme.txt)(`Stable tag`)的版本号一起改好,合并到 `main`。
+2. 打 tag 并推送:`git tag v0.6.0 && git push origin v0.6.0`。
+3. GitHub Actions([release.yml](.github/workflows/release.yml))自动校验版本号、用 `bin/build-zip.sh` 打包并创建 Release(附安装包)。
 4. 各站后台约 12 小时内自动提示更新;也可在「设置 → WP MCP → 插件更新 → 立即检查更新」强制刷新。
 
-因布局是「插件文件放仓库根」,GitHub 源码包可直接安装,无需额外附 zip 资产(附打包好的 zip 更稳)。
+> ⚠️ Release 一旦发布,**所有**装了本插件的站点都会收到更新。发版前确认改动对每个站点都可接受。
+
+本地打包:`bin/build-zip.sh` → `build/wp-mcp-<版本>.zip`(不含测试、文档、开发文件)。
+
+## 测试
+
+```bash
+tests/e2e/setup.sh /tmp/wp-mcp-e2e && tests/e2e/run.sh /tmp/wp-mcp-e2e
+```
+
+自动搭建 WordPress + WooCommerce(SQLite)测试站并运行全部端到端测试,详见 [tests/e2e/README.md](tests/e2e/README.md)。
+每次推送与 PR 会在 GitHub Actions 上以 PHP 7.4 与 8.3 自动运行。
 
 ### 配置
 
@@ -196,10 +223,7 @@ curl -s -X POST https://你的站点/wp-json/mcp/v1/ \
 
 ## 下一步
 
-- **0.6.0**:工具说明中英双语、自动化测试与 CI、打包脚本
+- 用真实客户端(claude.ai、ChatGPT、Gemini、Cursor 等)在线上站点逐一实测 OAuth 接入,按实际情况修正兼容细节。
+- 可选:写操作记录改动前后的值、跨站编排、MCP Prompts 工作流。
 
 已知限制:`wc_reports sales` 为毛销售额,未扣除退款;净额可用 `wp_rest` 调 `/wc-analytics/reports/revenue/stats`。
-
-原规划中的其他项:审计日志落自定义表(替代滚动 option)、写操作记录前后值;打包构建脚本输出
-可上传 `.zip`;自建私有插件更新服务器(5-10 站一处发版、各站自动提示升级)。
-可选阶段 6:跨站编排规范、SKU 身份映射、MCP Prompts 工作流。
