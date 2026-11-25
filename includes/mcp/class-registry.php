@@ -11,19 +11,11 @@ defined( 'ABSPATH' ) || exit;
 
 use WPMCP\Tools\Abstract_Tool;
 use WPMCP\Tools\WP\WP_Site_Tool;
-use WPMCP\Tools\WP\WP_Content_Tool;
 use WPMCP\Tools\WP\WP_Media_Tool;
-use WPMCP\Tools\WP\WP_Blocks_Tool;
-use WPMCP\Tools\WP\WP_Elementor_Tool;
-use WPMCP\Tools\WP\WP_Design_Tool;
-use WPMCP\Tools\WP\WP_Theme_Tool;
 use WPMCP\Tools\WP\WP_Taxonomy_Tool;
-use WPMCP\Tools\WP\WP_Comments_Tool;
 use WPMCP\Tools\WP\WP_Users_Tool;
 use WPMCP\Tools\WP\WP_Settings_Tool;
 use WPMCP\Tools\WP\WP_Plugins_Tool;
-use WPMCP\Tools\WP\WP_Menus_Tool;
-use WPMCP\Tools\WP\WP_Widgets_Tool;
 use WPMCP\Tools\WP\WP_System_Tool;
 use WPMCP\Tools\WP\WP_Rest_Tool;
 use WPMCP\Tools\WC\WC_Products_Tool;
@@ -54,28 +46,16 @@ class Registry {
 	public function __construct() {
 		// WordPress 工具(始终可用)。
 		$this->register( new WP_Site_Tool() );
-		$this->register( new WP_Content_Tool() );
 		$this->register( new WP_Media_Tool() );
-		$this->register( new WP_Blocks_Tool() );
-		$this->register( new WP_Design_Tool() );
-		$this->register( new WP_Theme_Tool() );
 		$this->register( new WP_Taxonomy_Tool() );
-		$this->register( new WP_Comments_Tool() );
 		$this->register( new WP_Users_Tool() );
 		$this->register( new WP_Settings_Tool() );
 		$this->register( new WP_Plugins_Tool() );
-		$this->register( new WP_Menus_Tool() );
-		$this->register( new WP_Widgets_Tool() );
 		$this->register( new WP_System_Tool() );
 
 		// 通用 REST 通道(可在设置页关闭)。
 		if ( get_option( 'wp_mcp_enable_rest', 1 ) ) {
 			$this->register( new WP_Rest_Tool() );
-		}
-
-		// Elementor 工具(仅在 Elementor 启用时暴露)。
-		if ( defined( 'ELEMENTOR_VERSION' ) ) {
-			$this->register( new WP_Elementor_Tool() );
 		}
 
 		// WooCommerce 工具(仅在 WC 启用时暴露)。

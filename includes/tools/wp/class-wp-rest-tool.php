@@ -14,6 +14,7 @@ defined( 'ABSPATH' ) || exit;
 
 use WPMCP\Safety\Audit;
 use WPMCP\Safety\Guard;
+use WPMCP\Safety\Pii;
 use WPMCP\Tools\Abstract_Tool;
 
 /**
@@ -36,7 +37,7 @@ class WP_Rest_Tool extends Abstract_Tool {
 	 * {@inheritDoc}
 	 */
 	public function get_description() {
-		return '通用 REST 通道 / Generic REST gateway: 以绑定用户权限调用本站任意 REST 路由(WordPress /wp/v2、WooCommerce /wc/v3、以及第三方插件注册的路由)。专用工具(wp_content、wc_products 等)没有覆盖的功能都走这里,例如商品图片/属性/变体、创建与编辑订单、税率、支付网关、运费、商品评价、自定义字段(meta)。'
+		return '通用 REST 通道 / Generic REST gateway: 以绑定用户权限调用本站任意 REST 路由(WordPress /wp/v2、WooCommerce /wc/v3、以及第三方插件注册的路由)。专用工具(wc_products、wc_orders 等)没有覆盖的功能都走这里,例如商品图片/属性/变体、创建与编辑订单、税率、支付网关、运费、商品评价、自定义字段(meta)。'
 			. '用法: namespaces=列出命名空间; routes=列出路由(可按 namespace / search 过滤); describe=查看某路由各方法的参数定义; call=发起请求(method + path + query + body)。'
 			. '调用前不确定参数时先 describe。列表请求建议用 query 传 per_page、page、_fields 控制体积。POST/PUT/PATCH 支持 dry_run; DELETE 需二次确认(confirm_token)。';
 	}
@@ -92,6 +93,11 @@ class WP_Rest_Tool extends Abstract_Tool {
 						'type'        => 'integer',
 						'description' => '响应体积上限(字节),默认 100000,最大 1000000。超出时列表会被截断并提示。',
 						'default'     => self::DEFAULT_MAX_BYTES,
+					),
+					'reveal_pii'    => array(
+						'type'        => 'boolean',
+						'description' => '返回未脱敏的客户个人信息(邮箱/电话/姓名/地址/IP)。默认脱敏,仅在确有必要时使用。',
+						'default'     => false,
 					),
 					'confirm_token' => array(
 						'type'        => 'string',
@@ -309,10 +315,24 @@ class WP_Rest_Tool extends Abstract_Tool {
 			$request->set_body( wp_json_encode( $body ) );
 		}
 
-		$response = rest_do_request( $request );
 		$server   = rest_get_server();
-		$data     = $server->response_to_data( $response, false );
+		$response = rest_ensure_response( rest_do_request( $request ) );
+		// 与真实 HTTP 请求一致地应用 _fields 等后处理(rest_do_request 不会触发)。
+		$response = apply_filters( 'rest_post_dispatch', $response, $server, $request );
+		$embed    = isset( $query['_embed'] ) ? rest_parse_embed_param( $query['_embed'] ) : false;
+		$data     = $server->response_to_data( $response, $embed );
 		$status   = (int) $response->get_status();
+
+		// 去掉 _links(体积大、对模型无用),除非显式要求。
+		if ( empty( $query['_links'] ) ) {
+			$data = $this->strip_links( $data );
+		}
+
+		// 与专用工具一致:默认脱敏客户 PII。
+		$masked = Pii::should_mask( $args );
+		if ( $masked ) {
+			$data = $this->mask_pii( $data );
+		}
 
 		if ( $status >= 400 ) {
 			$message = is_array( $data ) && isset( $data['message'] ) ? (string) $data['message'] : 'REST 请求失败';
@@ -332,6 +352,9 @@ class WP_Rest_Tool extends Abstract_Tool {
 			'method' => $method,
 			'path'   => $path,
 		);
+		if ( $masked ) {
+			$result['pii_masked'] = true;
+		}
 
 		$headers = $response->get_headers();
 		if ( isset( $headers['X-WP-Total'] ) ) {
@@ -390,6 +413,57 @@ class WP_Rest_Tool extends Abstract_Tool {
 		$result['keys'] = is_array( $data ) ? array_keys( $data ) : array();
 		$result['note'] = $hint;
 		return $result;
+	}
+
+	/**
+	 * 递归去掉响应中的 _links。
+	 *
+	 * @param mixed $data 响应数据。
+	 * @return mixed
+	 */
+	private function strip_links( $data ) {
+		if ( ! is_array( $data ) ) {
+			return $data;
+		}
+		unset( $data['_links'] );
+		foreach ( $data as $k => $v ) {
+			if ( is_array( $v ) ) {
+				$data[ $k ] = $this->strip_links( $v );
+			}
+		}
+		return $data;
+	}
+
+	/**
+	 * 按字段名递归脱敏个人信息(订单、客户、用户等任意路由通用)。
+	 *
+	 * @param mixed $data 响应数据。
+	 * @return mixed
+	 */
+	private function mask_pii( $data ) {
+		if ( ! is_array( $data ) ) {
+			return $data;
+		}
+		foreach ( $data as $k => $v ) {
+			if ( is_array( $v ) ) {
+				$data[ $k ] = $this->mask_pii( $v );
+				continue;
+			}
+			if ( ! is_string( $v ) || '' === $v || ! is_string( $k ) ) {
+				continue;
+			}
+			$key = strtolower( $k );
+			if ( false !== strpos( $key, 'email' ) ) {
+				$data[ $k ] = Pii::email( $v );
+			} elseif ( false !== strpos( $key, 'phone' ) ) {
+				$data[ $k ] = Pii::phone( $v );
+			} elseif ( in_array( $key, array( 'first_name', 'last_name', 'billing_first_name', 'billing_last_name', 'shipping_first_name', 'shipping_last_name' ), true ) ) {
+				$data[ $k ] = Pii::name( $v );
+			} elseif ( in_array( $key, array( 'address_1', 'address_2', 'postcode', 'company', 'customer_ip_address', 'ip_address' ), true ) ) {
+				$data[ $k ] = '***';
+			}
+		}
+		return $data;
 	}
 
 	/**

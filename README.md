@@ -4,7 +4,10 @@
 
 > 完整方案见 [`docs/development-plan.md`](docs/development-plan.md)。
 
-## 当前进度:阶段 0 → 阶段 3(MVP 已齐)
+## 当前进度
+
+> **范围调整(未发布)**:已移除网站内容与设计类工具(文章页面、区块、Elementor、全局样式/模板、主题、评论、菜单、小工具),专注店铺运营与站点管理。保留 `wp_media`(商品图片)与 `wp_taxonomy`(商品分类/标签)。
+> 新增通用 REST 通道 `wp_rest`,补齐专用工具未覆盖的 WooCommerce / WordPress / 第三方插件接口。
 
 **阶段 0(脚手架与协议层)**
 - ✅ MCP 协议处理器(JSON-RPC 2.0 over 无状态 Streamable HTTP)
@@ -15,7 +18,6 @@
 - ✅ 后台设置页:端点、令牌、绑定用户、安全开关、能力概览、审计日志
 
 **阶段 1(只读连通)**
-- ✅ `wp_content`:`list` / `get` / `revisions` / `types`(文章/页面/CPT)
 - ✅ `wc_products`:`list` / `get` / `variations` / `categories`
 - ✅ `wc_orders`:`list` / `get`(客户 PII 默认脱敏,`reveal_pii` 可解锁)
 - ✅ `wc_reports`:`sales` / `top_products`(按日期区间聚合)
@@ -24,29 +26,16 @@
 
 **阶段 2(内容与订单写操作)**
 - ✅ 写护栏 `Guard`:`dry_run` 预演 + 危险操作 `confirm_token` 一次性二次确认
-- ✅ `wp_content` 写:`create` / `update` / `delete`(回收站/永久) / `rollback`(修订回滚)
 - ✅ `wp_media`:`list` / `get` / `upload`(URL sideload) / `update` / `delete`
-- ✅ `wp_blocks`:`get_blocks`(解析) / `reusable_*`(可复用区块 CRUD) / `patterns`
 - ✅ `wc_products` 写:`create` / `update` / `delete`
 - ✅ `wc_orders` 写:`set_status` / `note` / `refund`(资金,需确认) / `update`
 - ✅ `wc_inventory`:`get` / `set_stock` / `bulk_set` / `low_stock`
 
-**阶段 3(设计控制)**
-- ✅ 设计快照仓库 `Backup`:写操作前自动存旧值,可按快照 ID 回滚
-- ✅ `wp_design`(FSE 块主题):`get/set_global_styles`(theme.json 用户层,深合并)、`list/get/update/revert_template`、`list/get/update_template_part`
-- ✅ `wp_design`(经典主题):`get/set_theme_mods`、`get/set_custom_css`(Additional CSS)
-- ✅ `wp_design` 通用:`list_fonts`、`backups`(列快照)、`rollback`(按 ID 还原,需确认)
-- ✅ `wp_theme`:`list` / `get` / `activate`(记录原主题可回滚) / `install`(slug 或 zip) / `update` / `delete` / `create_child`
-- ✅ FSE/经典分支:能力探测区分块主题,FSE 专属 action 在经典主题上友好报错
-
 **阶段 4(全功能补齐)**
 - ✅ `wp_taxonomy`:`list_taxonomies` / `list` / `get` / `create` / `update` / `delete`(分类/标签/自定义)
-- ✅ `wp_comments`:`list` / `get` / `approve` / `unapprove` / `spam` / `trash` / `reply` / `edit` / `delete`(作者 PII 脱敏)
 - ✅ `wp_users`:`list` / `get` / `create` / `update` / `set_role` / `delete`(邮箱脱敏 + 能力校验)
 - ✅ `wp_settings`:`get` / `set`(白名单:常规/阅读/讨论/固定链接;改链接自动刷新重写)
 - ✅ `wp_plugins`:`list` / `activate` / `deactivate` / `install` / `update` / `delete`
-- ✅ `wp_menus`:`list` / `get` / `create` / `delete` / `add_item` / `update_item` / `delete_item` / `locations` / `assign_location`
-- ✅ `wp_widgets`:`sidebars` / `get`(只读盘点;区块小工具写入易碎,布局调整走 `wp_design`)
 - ✅ `wp_system`:`site_health` / `cron_list` / `cron_run` / `cache_flush` / `transients_flush` / `options_get` / `options_set`
 - ✅ `wc_customers`:`list` / `get` / `create` / `update` / `delete`(PII 脱敏 + 订单数/消费额)
 - ✅ `wc_coupons`:`list` / `get` / `create` / `update` / `delete`
@@ -54,7 +43,14 @@
 - ✅ `wc_shipping`:`list_zones` / `get_zone` / `create_zone` / `add_method` / `delete_zone`
 - ✅ `wc_webhooks`:`list` / `get` / `create` / `update` / `delete`
 
-> 工具总数:WordPress 13 个 + WooCommerce 9 个,经能力探测后按站点条件暴露。
+**阶段 5(通用 REST 通道)**
+- ✅ `wp_rest`:`namespaces` / `routes`(按命名空间或关键词查路由) / `describe`(查参数定义) / `call`(调用本站任意 REST 路由)
+  - 以绑定用户权限执行;非 GET 支持 `dry_run`,DELETE 需二次确认;客户 PII 默认脱敏(`reveal_pii` 解锁)
+  - 支持 `_fields` 精简返回、自动去掉 `_links`、超过 `max_bytes` 自动截断
+  - 覆盖:商品图片/属性/变体、建单与改单、税率、支付网关、运费、评价、post meta、第三方插件接口等
+  - 设置页可关闭
+
+> 工具总数:WordPress 8 个 + WooCommerce 9 个,经能力探测后按站点条件暴露。
 
 ## 目录结构
 
@@ -70,10 +66,10 @@ wp-mcp/
 │   │   └── class-registry.php  # 工具注册表
 │   ├── tools/
 │   │   ├── abstract-tool.php   # 工具基类
-│   │   ├── wp/                 # site/content/media/blocks/design/theme/taxonomy/comments/users/settings/plugins/menus/widgets/system
+│   │   ├── wp/                 # site/media/taxonomy/users/settings/plugins/system/rest
 │   │   └── wc/                 # products/orders/reports/inventory/customers/coupons/settings/shipping/webhooks
 │   ├── capability/class-detector.php
-│   ├── safety/                 # audit / pii / guard / backup(快照回滚)
+│   ├── safety/                 # audit / pii / guard
 │   └── admin/class-settings.php
 ├── composer.json
 └── readme.txt
