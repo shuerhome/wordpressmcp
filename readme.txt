@@ -4,7 +4,7 @@ Tags: mcp, claude, ai, woocommerce, rest-api
 Requires at least: 5.9
 Tested up to: 6.8
 Requires PHP: 7.4
-Stable tag: 0.4.0
+Stable tag: 0.5.0
 License: GPLv2 or later
 
 把本站变成一个 MCP 服务器,让 Claude 通过站点 URL 精细控制 WordPress / WooCommerce。
@@ -30,12 +30,26 @@ License: GPLv2 or later
    注意:只能保留**一份**本插件。从 GitHub 下载的压缩包解压后目录名常是 `wordpressmcp-main`
    或 `wordpressmcp-0.2.x`;若你又上传了一份改名为 `wp-mcp` 的副本,两份同时启用会触发致命错误
    导致整站白屏。务必删掉多余的目录,只留一个(目录名叫什么都行)。
-2. 进入「设置 → WP MCP」,点击「生成令牌」,复制明文令牌。
-3. 连接(端点 `https://你的站点/wp-json/mcp/v1/rpc`,鉴权支持 Bearer 头 / ?token= / X-MCP-Token):
-   * Claude Code:`claude mcp add --transport http 站点名 https://你的站点/wp-json/mcp/v1/rpc --header "Authorization: Bearer <令牌>"`
-   * claude.ai 网页端:设置 → 连接器 → 添加自定义连接器,URL 填 `https://你的站点/wp-json/mcp/v1/rpc?token=<令牌>`(需公网 HTTPS)。
+2. 连接(端点 `https://你的站点/wp-json/mcp/v1/rpc`):
+   * 支持 OAuth 的客户端(claude.ai、Claude 桌面版、ChatGPT、Gemini、Cursor、VS Code 等):只填端点 URL,按提示在本站登录并选择权限级别。
+     需要公网 HTTPS,且固定链接不是「朴素」。
+   * 可填请求头的客户端(Claude Code、脚本等):「设置 → WP MCP → 新建令牌」,配置 `Authorization: Bearer <令牌>`。
+     Claude Code:`claude mcp add --transport http 站点名 https://你的站点/wp-json/mcp/v1/rpc --header "Authorization: Bearer <令牌>"`
 
 == Changelog ==
+
+= 0.5.0 =
+* 新增 OAuth 2.1 登录(按 MCP 授权规范):claude.ai 网页端、Claude 桌面版、ChatGPT、Gemini、Cursor、VS Code 等支持 OAuth 的客户端只需填端点 URL,
+  在本站登录并选择权限级别即可连接。支持受保护资源元数据、授权服务器元数据、动态客户端注册、客户端元数据文档、PKCE(S256)、
+  刷新令牌轮换(旧刷新令牌被重复使用时自动吊销连接)、吊销端点。OAuth 端点走前台路径,不受 WordPress 应用密码机制干扰。
+* 新增多连接与三级权限:只读 / 运营(不含退款)/ 完全管理,在服务端强制执行;连接级别不超过绑定用户自身的权限。
+  手动令牌可设名称、绑定用户、有效期;所有连接可单独吊销;只读连接不能解锁客户个人信息。
+* 新增限流:每连接每分钟读 120 / 写 30 次、每日经确认的危险操作 50 次(可调);OAuth 注册与令牌端点按 IP 限流。
+* 审计日志改存独立数据表:记录连接、用户、工具、动作、目标、结果、说明、IP;后台可筛选、导出 CSV;默认保留 90 天。
+* 危险操作确认令牌绑定到发起它的连接,其他连接无法使用。
+* 升级:原有单个令牌自动迁移为一条「完全管理」连接,继续可用;旧的审计日志选项被清理。
+* 后台设置页重做:连接列表、新建令牌、已注册 OAuth 应用、限流与审计设置。
+
 
 = 0.4.0 =
 **不兼容变更:**已移除网站内容与设计类工具(wp_content、wp_blocks、wp_elementor、wp_design、wp_theme、

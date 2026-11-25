@@ -36,16 +36,17 @@ class Transport {
 	public function register_routes() {
 		// 同时注册到 /rpc 子路径与根 /。
 		// /rpc 是推荐端点:无尾斜杠,可绕开"尾斜杠被服务器/CDN 剥除"导致的 404。
+		// 鉴权在回调内完成(需要在 401 时附带 WWW-Authenticate 头,供客户端发现 OAuth)。
 		$handlers = array(
 			array(
 				'methods'             => 'POST',
 				'callback'            => array( $this, 'handle_post' ),
-				'permission_callback' => array( '\WPMCP\Mcp\Auth', 'check' ),
+				'permission_callback' => '__return_true',
 			),
 			array(
 				'methods'             => 'GET',
 				'callback'            => array( $this, 'handle_get' ),
-				'permission_callback' => array( '\WPMCP\Mcp\Auth', 'check' ),
+				'permission_callback' => '__return_true',
 			),
 		);
 
@@ -60,6 +61,11 @@ class Transport {
 	 * @return \WP_REST_Response
 	 */
 	public function handle_post( $request ) {
+		$auth = Auth::authenticate( $request );
+		if ( is_wp_error( $auth ) ) {
+			return self::auth_error( $auth );
+		}
+
 		$server   = new Server( $this->registry );
 		$response = $server->handle( $request->get_body() );
 
@@ -78,10 +84,59 @@ class Transport {
 	 *
 	 * @return \WP_REST_Response
 	 */
-	public function handle_get() {
+	public function handle_get( $request ) {
+		$auth = Auth::authenticate( $request );
+		if ( is_wp_error( $auth ) ) {
+			return self::auth_error( $auth );
+		}
 		return new \WP_REST_Response(
 			array( 'error' => 'This MCP server uses stateless Streamable HTTP; use POST.' ),
 			405
+		);
+	}
+
+	/**
+	 * 鉴权失败响应。401 时附带 WWW-Authenticate,指向 OAuth 元数据。
+	 *
+	 * @param \WP_Error $error 错误。
+	 * @return \WP_REST_Response
+	 */
+	private static function auth_error( $error ) {
+		$data   = $error->get_error_data();
+		$status = isset( $data['status'] ) ? (int) $data['status'] : 401;
+		$resp   = new \WP_REST_Response(
+			array(
+				'code'    => $error->get_error_code(),
+				'message' => $error->get_error_message(),
+			),
+			$status
+		);
+		if ( 401 === $status ) {
+			$resp->header( 'WWW-Authenticate', Auth::www_authenticate( 'wp_mcp_unauthorized' === $error->get_error_code() && false !== strpos( $error->get_error_message(), '无效' ) ? 'invalid_token' : '' ) );
+		}
+		return $resp;
+	}
+
+	/**
+	 * 跨域:允许浏览器内客户端读取 WWW-Authenticate,并发送 MCP 协议头。
+	 */
+	public static function register_cors() {
+		add_filter(
+			'rest_exposed_cors_headers',
+			function ( $headers ) {
+				$headers[] = 'WWW-Authenticate';
+				$headers[] = 'Mcp-Session-Id';
+				return $headers;
+			}
+		);
+		add_filter(
+			'rest_allowed_cors_headers',
+			function ( $headers ) {
+				$headers[] = 'MCP-Protocol-Version';
+				$headers[] = 'Mcp-Session-Id';
+				$headers[] = 'X-MCP-Token';
+				return $headers;
+			}
 		);
 	}
 }

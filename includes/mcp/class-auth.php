@@ -1,6 +1,6 @@
 <?php
 /**
- * 鉴权:Bearer 令牌校验 + 绑定用户 + 安全前置检查。
+ * 鉴权:按令牌识别连接、绑定用户、计算有效级别,以及安全前置检查。
  *
  * @package WPMCP
  */
@@ -14,95 +14,124 @@ defined( 'ABSPATH' ) || exit;
  */
 class Auth {
 
-	const OPT_TOKEN_HASH  = 'wp_mcp_token_hash';
+	const OPT_TOKEN_HASH  = 'wp_mcp_token_hash'; // 0.5.0 前的单令牌(升级时迁移为一条连接)。
 	const OPT_BOUND_USER  = 'wp_mcp_bound_user';
 	const OPT_ENABLED     = 'wp_mcp_enabled';
 	const OPT_IP_ALLOW    = 'wp_mcp_ip_allowlist';
 
 	/**
-	 * REST permission_callback:校验请求是否被授权。
+	 * 本次请求的连接(含有效级别 effective_tier)。
+	 *
+	 * @var object|null
+	 */
+	private static $current = null;
+
+	/**
+	 * 当前连接。
+	 *
+	 * @return object|null
+	 */
+	public static function current() {
+		return self::$current;
+	}
+
+	/**
+	 * 当前连接的有效级别。
+	 *
+	 * @return string|null
+	 */
+	public static function tier() {
+		return self::$current ? self::$current->effective_tier : null;
+	}
+
+	/**
+	 * 校验 MCP 请求,成功时绑定用户并记录当前连接。
 	 *
 	 * @param \WP_REST_Request $request 请求。
+	 * @return object|\WP_Error 连接或错误(错误的 data.status 为 HTTP 状态码)。
+	 */
+	public static function authenticate( $request ) {
+		self::$current = null;
+
+		$pre = self::precheck();
+		if ( is_wp_error( $pre ) ) {
+			return $pre;
+		}
+
+		$from_query = false;
+		$token      = self::extract_token( $request, $from_query );
+		$conn       = null;
+
+		if ( '' !== $token ) {
+			$conn = Connections::find_by_token( $token );
+			// URL 中的令牌只接受手动令牌(OAuth 访问令牌必须走请求头)。
+			if ( $conn && $from_query && 'static' !== $conn->type ) {
+				$conn = null;
+			}
+			if ( ! $conn ) {
+				return new \WP_Error( 'wp_mcp_unauthorized', '访问令牌无效、已过期或已吊销', array( 'status' => 401 ) );
+			}
+		} elseif ( is_user_logged_in() && current_user_can( 'manage_options' ) ) {
+			// 兼容:通过 Application Password(Basic 认证)登录的管理员。
+			$conn = (object) array(
+				'id'      => 0,
+				'name'    => 'Application Password: ' . wp_get_current_user()->user_login,
+				'type'    => 'app_password',
+				'tier'    => Connections::TIER_FULL,
+				'user_id' => get_current_user_id(),
+			);
+		}
+
+		if ( ! $conn ) {
+			return new \WP_Error( 'wp_mcp_unauthorized', '缺少访问令牌', array( 'status' => 401 ) );
+		}
+
+		$max = Connections::max_tier_for_user( (int) $conn->user_id );
+		if ( null === $max ) {
+			return new \WP_Error( 'wp_mcp_forbidden', '该连接绑定的用户已不存在或没有店铺管理权限', array( 'status' => 403 ) );
+		}
+
+		wp_set_current_user( (int) $conn->user_id );
+		$conn->effective_tier = Connections::min_tier( $conn->tier, $max );
+		self::$current        = $conn;
+
+		if ( $conn->id ) {
+			Connections::touch( $conn, \WPMCP\Safety\Audit::ip() );
+		}
+		return $conn;
+	}
+
+	/**
+	 * 通用前置检查:总开关、HTTPS、IP 白名单。OAuth 端点也复用。
+	 *
 	 * @return true|\WP_Error
 	 */
-	public static function check( $request ) {
-		// 1. 总开关。
+	public static function precheck() {
 		if ( ! get_option( self::OPT_ENABLED, 1 ) ) {
 			return new \WP_Error( 'wp_mcp_disabled', 'MCP 端点已停用', array( 'status' => 503 ) );
 		}
-
-		// 2. 强制 HTTPS(本地主机除外,便于开发)。
 		if ( ! is_ssl() && ! self::is_local_host() ) {
 			return new \WP_Error( 'wp_mcp_https_required', '必须通过 HTTPS 访问', array( 'status' => 403 ) );
 		}
-
-		// 3. IP 白名单(可选)。
 		if ( ! self::ip_allowed() ) {
 			return new \WP_Error( 'wp_mcp_ip_blocked', 'IP 不在白名单内', array( 'status' => 403 ) );
 		}
-
-		// 4. 令牌校验(兼容三种来源:Bearer 头 / ?token= 查询参数 / X-MCP-Token 头)。
-		$token = self::extract_token( $request );
-
-		if ( $token && self::verify_token( $token ) ) {
-			$user_id = (int) get_option( self::OPT_BOUND_USER, 0 );
-			if ( $user_id > 0 ) {
-				wp_set_current_user( $user_id );
-			}
-			return true;
-		}
-
-		// 5. 兼容:已通过 Application Password 登录且具备管理权限。
-		if ( is_user_logged_in() && current_user_can( 'manage_options' ) ) {
-			return true;
-		}
-
-		return new \WP_Error(
-			'wp_mcp_unauthorized',
-			'缺少或无效的访问令牌',
-			array( 'status' => 401 )
-		);
+		return true;
 	}
 
 	/**
-	 * 生成新令牌,存储其哈希,返回明文(仅此一次)。
+	 * 未授权时的 WWW-Authenticate 头(指向 OAuth 受保护资源元数据,供客户端自动发现登录方式)。
 	 *
-	 * @return string 明文令牌。
+	 * @param string $error 可选错误码(invalid_token 等)。
+	 * @return string
 	 */
-	public static function generate_token() {
-		$token = 'mcp_' . wp_generate_password( 48, false, false );
-		update_option( self::OPT_TOKEN_HASH, hash( 'sha256', $token ) );
-		return $token;
-	}
-
-	/**
-	 * 吊销当前令牌。
-	 */
-	public static function revoke_token() {
-		delete_option( self::OPT_TOKEN_HASH );
-	}
-
-	/**
-	 * 是否已设置令牌。
-	 *
-	 * @return bool
-	 */
-	public static function has_token() {
-		return (bool) get_option( self::OPT_TOKEN_HASH, '' );
-	}
-
-	/**
-	 * 校验明文令牌是否匹配存储的哈希。
-	 *
-	 * @param string $token 明文令牌。
-	 * @return bool
-	 */
-	private static function verify_token( $token ) {
-		$stored = get_option( self::OPT_TOKEN_HASH, '' );
-		if ( empty( $stored ) ) {
-			return false;
+	public static function www_authenticate( $error = '' ) {
+		$value = 'Bearer resource_metadata="' . OAuth::resource_metadata_url() . '"';
+		$value .= ', scope="' . implode( ' ', OAuth::scopes() ) . '"';
+		if ( $error ) {
+			$value .= ', error="' . $error . '"';
 		}
-		return hash_equals( $stored, hash( 'sha256', $token ) );
+		return $value;
 	}
 
 	/**
@@ -114,7 +143,7 @@ class Auth {
 	 * @param \WP_REST_Request|mixed $request 请求。
 	 * @return string
 	 */
-	private static function extract_token( $request ) {
+	private static function extract_token( $request, &$from_query = false ) {
 		// 1) Authorization: Bearer。
 		$header = self::get_auth_header();
 		if ( $header && 0 === stripos( $header, 'bearer ' ) ) {
@@ -125,6 +154,7 @@ class Auth {
 		if ( $request instanceof \WP_REST_Request ) {
 			$query = $request->get_query_params();
 			if ( ! empty( $query['token'] ) ) {
+				$from_query = true;
 				return trim( (string) $query['token'] );
 			}
 		}
@@ -142,7 +172,7 @@ class Auth {
 	 *
 	 * @return string
 	 */
-	private static function get_auth_header() {
+	public static function get_auth_header() {
 		if ( ! empty( $_SERVER['HTTP_AUTHORIZATION'] ) ) {
 			return trim( wp_unslash( $_SERVER['HTTP_AUTHORIZATION'] ) );
 		}
@@ -164,7 +194,7 @@ class Auth {
 	 *
 	 * @return bool
 	 */
-	private static function is_local_host() {
+	public static function is_local_host() {
 		$host = isset( $_SERVER['HTTP_HOST'] ) ? strtolower( wp_unslash( $_SERVER['HTTP_HOST'] ) ) : '';
 		$host = preg_replace( '/:\d+$/', '', $host );
 		if ( in_array( $host, array( 'localhost', '127.0.0.1', '::1' ), true ) ) {

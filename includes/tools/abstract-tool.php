@@ -76,11 +76,7 @@ abstract class Abstract_Tool {
 
 		$result = $this->run( $action, $args );
 
-		Audit::log(
-			$this->get_name(),
-			$args,
-			is_wp_error( $result ) ? 'error' : 'success'
-		);
+		Audit::log( $this->get_name(), $args, Audit::result_of( $result ), is_wp_error( $result ) ? $result->get_error_message() : '' );
 
 		return $result;
 	}

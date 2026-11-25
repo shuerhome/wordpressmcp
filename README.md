@@ -52,6 +52,12 @@
 - ✅ `wp_media` 支持 base64 上传本地图片(`data` + `filename`,上限 10MB)
 - ✅ 多模型兼容:`tools/list` 带工具标题与 MCP 标注(只读 / 危险 / 访问站外);`initialize` 下发与厂商无关的使用说明
 
+**阶段 6(多模型接入与权限,0.5.0)**
+- ✅ OAuth 2.1 授权服务器(MCP 授权规范):受保护资源元数据、授权服务器元数据、动态客户端注册、客户端元数据文档、PKCE、刷新令牌轮换与重放检测、吊销端点
+- ✅ 多连接:手动令牌与 OAuth 连接统一管理,三级权限(只读 / 运营 / 完全管理),可设有效期、单独吊销
+- ✅ 限流:每连接每分钟读/写上限、每日危险操作上限
+- ✅ 审计:独立数据表,记录连接与 IP,可筛选、导出 CSV,按天数自动清理
+
 > 工具总数:WordPress 8 个 + WooCommerce 9 个,经能力探测后按站点条件暴露。
 
 ## 目录结构
@@ -82,32 +88,57 @@ wp-mcp/
 1. 把 `wp-mcp` 目录打包为 zip,后台「插件 → 上传安装」并启用。
    > ⚠️ **只保留一份本插件。** 从 GitHub 下载的压缩包解压目录名常是 `wordpressmcp-main` /
    > `wordpressmcp-0.2.x`;若再上传一份改名为 `wp-mcp` 的副本,两份同时启用会因重复声明而触发
-   > 致命错误、整站白屏。请删掉多余目录,只留一个(目录名任意)。0.2.1 起即便误装两份也会自动
-   > 只启用一份并在后台提示,但仍建议清理干净。
-2. 「设置 → WP MCP」→「生成令牌」,复制明文。
-3. 端点(两个都可用,推荐 `/rpc`,无尾斜杠更稳):
-   `https://你的站点/wp-json/mcp/v1/rpc`
+   > 致命错误、整站白屏。请删掉多余目录,只留一个(目录名任意)。
+2. 端点:`https://你的站点/wp-json/mcp/v1/rpc`
+3. 按客户端选一种方式连接(0.5.0 起):
 
-鉴权支持三种来源(任一即可):`Authorization: Bearer <令牌>` 头、`?token=<令牌>` 查询参数、`X-MCP-Token: <令牌>` 头。
+### A. 用账号登录(OAuth)— claude.ai、Claude 桌面版、ChatGPT、Gemini、Cursor、VS Code 等
 
-### A. Claude Code(CLI / VSCode / JetBrains)— 推荐
+在客户端里添加 MCP 服务器 / 自定义连接器,**只填端点 URL**。客户端会自动:
+
+1. 从 401 响应发现本站的 OAuth 元数据(`/.well-known/oauth-protected-resource`、`/.well-known/oauth-authorization-server`);
+2. 自动注册为本站的 OAuth 应用(或使用客户端元数据文档);
+3. 打开本站登录页 → 授权页选择**权限级别** → 回到客户端完成连接。
+
+要求:公网 HTTPS;固定链接不是「朴素」;服务器把 `/.well-known/*` 和 `/mcp-oauth/*` 交给 WordPress 处理(见下方排查)。
+
+### B. 手动令牌 — Claude Code、脚本、自建 Agent、Cherry Studio 等可填请求头的客户端
+
+「设置 → WP MCP → 新建令牌」,选名称、级别、绑定用户、有效期,生成后:
 
 ```bash
-claude mcp add --transport http mysite https://你的站点/wp-json/mcp/v1/rpc \
-  --header "Authorization: Bearer <令牌>"
+claude mcp add --transport http mysite https://你的站点/wp-json/mcp/v1/rpc --header "Authorization: Bearer <令牌>"
 ```
 
-### B. claude.ai 网页端(自定义连接器)
+其他客户端的通用配置:`{ "url": "https://你的站点/wp-json/mcp/v1/rpc", "headers": { "Authorization": "Bearer <令牌>" } }`。
+实在不能填请求头时可用 `?token=<令牌>`(仅限手动令牌,易被日志留存)。
 
-「设置 → 连接器 → 添加自定义连接器」,URL 填(令牌内嵌在 URL):
+### 权限级别
 
-```
-https://你的站点/wp-json/mcp/v1/rpc?token=<令牌>
-```
+| 级别 | 能做什么 |
+|---|---|
+| 只读 | 查看商品、订单、库存、客户、报表、设置;不能修改任何数据;客户个人信息始终脱敏 |
+| 运营 | 只读 + 商品/变体/库存、订单(改状态、备注、编辑,**不含退款**)、优惠券、客户、商品图片与分类 |
+| 完全管理 | 全部功能,含退款、插件、用户、站点与店铺设置、支付配置 |
 
-- 需站点为**公网 HTTPS**(claude.ai 云端要能访问到)。
-- 令牌在 URL 中易被日志/历史留存,**建议同时启用 IP 白名单**,并按需重新生成令牌吊销旧的。
-- 网页端连接器规则可能变化;能否连通以实际为准。若网页端要求 OAuth,则需后续给插件补 OAuth(规划中)。
+- 在服务端强制执行,越权调用直接拒绝并记入审计。
+- 连接的有效级别不超过绑定用户自身的权限(管理员 → 完全管理;店铺管理员 → 运营;仅报表权限 → 只读),用户被降权后其连接随之降级或失效。
+- 规则可用过滤器 `wp_mcp_tier_policy`、`wp_mcp_ops_rest_write_routes` 调整。
+
+### OAuth 连不上时排查
+
+| 现象 | 处理 |
+|---|---|
+| 客户端提示找不到授权服务器 | 浏览器打开 `https://你的站点/.well-known/oauth-authorization-server`,应返回 JSON。若 404:Nginx 常把 `.well-known` 当静态目录,需加 `location ^~ /.well-known/oauth- { try_files $uri /index.php?$args; }`;CDN/防火墙不要拦截该路径 |
+| 授权页打不开 / 404 | 检查固定链接不是「朴素」;`/mcp-oauth/authorize` 需能被 WordPress 处理 |
+| 登录后一直 401 | 部分 Apache(CGI/FastCGI)会丢弃 `Authorization` 头。在 `.htaccess` 加 `RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]`,或加 `CGIPassAuth On` |
+| 云端客户端连接被拒 | 启用了 IP 白名单时,claude.ai、ChatGPT 等云端出口 IP 不固定,请关闭白名单 |
+| WordPress 装在子目录 | `/.well-known/` 必须在域名根目录可访问,需在根目录服务器配置中转发到 WordPress |
+
+### 限流与审计
+
+- 每个连接每分钟读 120 次、写 30 次,每天经确认的危险操作 50 次(可在设置页调整,0 为不限)。超限时 AI 收到「请稍后重试」,不影响访客。
+- 审计日志记录连接、用户、工具、动作、目标、结果、说明、IP,存独立数据表,默认保留 90 天,可在设置页筛选和导出 CSV。
 
 ## 本地冒烟测试(无需 Claude)
 
@@ -165,7 +196,6 @@ curl -s -X POST https://你的站点/wp-json/mcp/v1/ \
 
 ## 下一步
 
-- **0.5.0**:OAuth 登录(让 claude.ai 网页端、ChatGPT 等只接受 OAuth 的客户端可接入)、多令牌分级(只读/运营/完全管理)、调用限流、审计增强
 - **0.6.0**:工具说明中英双语、自动化测试与 CI、打包脚本
 
 已知限制:`wc_reports sales` 为毛销售额,未扣除退款;净额可用 `wp_rest` 调 `/wc-analytics/reports/revenue/stats`。

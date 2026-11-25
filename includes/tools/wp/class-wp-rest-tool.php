@@ -143,11 +143,12 @@ class WP_Rest_Tool extends Abstract_Tool {
 
 		$result = $this->run( $action, $args );
 
-		$label = $action;
+		// 方法与路径记入审计的 target 字段。
+		$log_args = $args;
 		if ( 'call' === $action ) {
-			$label = sprintf( 'call %s %s', $this->method_of( $args ), isset( $args['path'] ) ? (string) $args['path'] : '' );
+			$log_args['method'] = $this->method_of( $args );
 		}
-		Audit::log( $this->get_name(), array( 'action' => $label ), is_wp_error( $result ) ? 'error' : 'success' );
+		Audit::log( $this->get_name(), $log_args, Audit::result_of( $result ), is_wp_error( $result ) ? $result->get_error_message() : '' );
 
 		return $result;
 	}

@@ -91,7 +91,11 @@ class Server {
 				return $this->result_response( $id, new \stdClass() );
 
 			case 'tools/list':
-				return $this->result_response( $id, array( 'tools' => $this->registry->list_for_mcp() ) );
+				$tools = $this->registry->list_for_mcp();
+				if ( Auth::tier() ) {
+					$tools = Policy::filter_tools( Auth::tier(), $tools );
+				}
+				return $this->result_response( $id, array( 'tools' => $tools ) );
 
 			case 'tools/call':
 				return $this->tools_call( $id, $params );
@@ -147,6 +151,16 @@ class Server {
 			. 'Start with wp_site (action=capabilities) to learn what this site supports. '
 			. 'Prefer the dedicated wp_* / wc_* tools for common tasks. ';
 
+		$conn = Auth::current();
+		if ( $conn ) {
+			$labels = array(
+				Connections::TIER_READ => 'read-only (no changes allowed)',
+				Connections::TIER_OPS  => 'operations (products, inventory, orders without refunds, coupons, customers, product media and categories)',
+				Connections::TIER_FULL => 'full administration',
+			);
+			$text .= 'This connection\'s permission level is ' . $labels[ $conn->effective_tier ] . '; calls outside it are rejected. ';
+		}
+
 		if ( $this->registry->get( 'wp_rest' ) ) {
 			$text .= 'For anything they do not cover, use wp_rest: action=routes to find a REST route, action=describe to see its parameters, action=call to invoke it. ';
 		}
@@ -174,7 +188,26 @@ class Server {
 			return $this->error_response( $id, -32602, '未知工具:' . $name );
 		}
 
-		$result = $tool->execute( $args );
+		// 权限级别与限流(服务端强制)。
+		$action = isset( $args['action'] ) ? (string) $args['action'] : '';
+		$conn   = Auth::current();
+		if ( $conn ) {
+			$allowed = Policy::check( $conn->effective_tier, $name, $action, $args );
+			if ( true === $allowed && Connections::TIER_READ === $conn->effective_tier ) {
+				unset( $args['reveal_pii'] ); // 只读连接不能解锁客户个人信息。
+			}
+			if ( true === $allowed ) {
+				$allowed = \WPMCP\Safety\Rate_Limit::hit_call( 'c' . (int) $conn->id . '_u' . (int) $conn->user_id, Policy::is_write( $name, $action, $args ) );
+			}
+			if ( is_wp_error( $allowed ) ) {
+				\WPMCP\Safety\Audit::log( $name, $args, 'denied', $allowed->get_error_message() );
+				$result = $allowed;
+			}
+		}
+
+		if ( ! isset( $result ) ) {
+			$result = $tool->execute( $args );
+		}
 
 		if ( is_wp_error( $result ) ) {
 			// 工具级错误:以 isError 形式返回(非协议错误)。
